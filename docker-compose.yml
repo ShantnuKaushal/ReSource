@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  db:
+    # We use a special image that already has the AI vector math extension installed
+    image: pgvector/pgvector:pg16
+    container_name: resource_db
+    # This maps the database port to your computer so Python can reach it
+    ports:
+      - "5432:5432"
+    # These are the default credentials we will use for development
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=resource_db
+    # This saves the data to a volume so it persists even if you restart your PC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
