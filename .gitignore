@@ -14,3 +14,8 @@ mobile/dist/
 
 # Ignore Environment Variables (Security)
 .env
+mobile/.env
+
+# Ignore Uploads
+backend/uploads/*
+!backend/uploads/.gitkeep
