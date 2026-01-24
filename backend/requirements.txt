@@ -1,0 +1,9 @@
+flask
+flask-cors
+sqlalchemy
+psycopg2-binary
+pgvector
+sentence-transformers
+google-generativeai
+pypdf
+python-dotenv
