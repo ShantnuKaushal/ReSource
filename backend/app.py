@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 import google.generativeai as genai
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
@@ -27,6 +28,24 @@ gemini_model = genai.GenerativeModel('gemini-flash-latest')
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+def utc_timestamp():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+@app.route('/documents', methods=['GET'])
+def list_documents():
+    db = next(get_db())
+    documents = db.query(Document).order_by(Document.id.desc()).all()
+    payload = [
+        {
+            "id": document.id,
+            "filename": document.filename,
+            "upload_date": document.upload_date,
+            "chunk_count": len(document.embeddings),
+        }
+        for document in documents
+    ]
+    return jsonify(payload), 200
+
 @app.route('/upload', methods=['POST'])
 def upload_document():
     if 'file' not in request.files:
@@ -41,10 +60,20 @@ def upload_document():
     file.save(file_path)
 
     raw_text = extract_text_from_pdf(file_path)
+    if not raw_text.strip():
+        return jsonify({"error": "We couldn't extract text from that PDF."}), 400
+
     text_chunks = chunk_text(raw_text)
+    if not text_chunks:
+        return jsonify({"error": "The PDF did not produce any retrievable chunks."}), 400
 
     db = next(get_db())
-    new_doc = Document(filename=filename, upload_date="2024-01-24") 
+    existing_doc = db.query(Document).filter(Document.filename == filename).first()
+    if existing_doc:
+        db.delete(existing_doc)
+        db.commit()
+
+    new_doc = Document(filename=filename, upload_date=utc_timestamp())
     db.add(new_doc)
     db.commit()
     db.refresh(new_doc)

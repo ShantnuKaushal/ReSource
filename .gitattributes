@@ -1,9 +1,0 @@
-mobile/package-lock.json linguist-generated
-mobile/package.json linguist-generated
-mobile/tsconfig.json linguist-generated
-mobile/babel.config.js linguist-generated
-mobile/tailwind.config.js linguist-generated
-mobile/assets/** linguist-vendored
-mobile/App.tsx linguist-vendored
-mobile/env.d.ts linguist-vendored
-mobile/src/screens/HomeScreen.tsx linguist-vendored
