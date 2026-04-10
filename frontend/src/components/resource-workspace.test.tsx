@@ -49,12 +49,12 @@ describe("ResourceWorkspace", () => {
     UploadFailureXHR.instances = [];
   });
 
-  it("shows empty source rail state and validates missing uploads", async () => {
+  it("shows the empty library state and validates missing uploads", async () => {
     render(<ResourceWorkspace />);
 
-    expect(await screen.findByText("No sources indexed")).toBeInTheDocument();
+    expect(await screen.findByText("Library is empty")).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Index document" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Index document" }));
 
     expect(screen.getByText("Choose a PDF before processing.")).toBeInTheDocument();
   });
@@ -63,13 +63,13 @@ describe("ResourceWorkspace", () => {
     vi.stubGlobal("XMLHttpRequest", UploadFailureXHR as unknown as typeof XMLHttpRequest);
     render(<ResourceWorkspace />);
 
-    await screen.findByText("No sources indexed");
+    await screen.findByText("Library is empty");
 
     const input = screen.getByLabelText("Choose PDF file");
     const file = new File(["test"], "notes.pdf", { type: "application/pdf" });
 
     fireEvent.change(input, { target: { files: [file] } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Index document" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Index document" }));
 
     await waitFor(() => {
       expect(screen.getByText("Upload failed. Please try again.")).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe("ResourceWorkspace", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<ResourceWorkspace />);
 
-    expect(await screen.findByRole("button", { name: /policy/i })).toBeInTheDocument();
+    expect(await screen.findByText("policy.pdf")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Ask a question"), {
       target: { value: "What does the policy cover?" },
@@ -105,36 +105,6 @@ describe("ResourceWorkspace", () => {
 
     await waitFor(() => {
       expect(screen.getByText("AI error. Please try again.")).toBeInTheDocument();
-    });
-  });
-
-  it("updates record details when a different document is selected", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse([
-        {
-          id: 1,
-          filename: "policy.pdf",
-          upload_date: "2026-04-10T00:00:00Z",
-          chunk_count: 6,
-        },
-        {
-          id: 2,
-          filename: "briefing-notes.pdf",
-          upload_date: "2026-04-11T00:00:00Z",
-          chunk_count: 12,
-        },
-      ]),
-    );
-
-    vi.stubGlobal("fetch", fetchMock);
-    render(<ResourceWorkspace />);
-
-    expect(await screen.findByRole("button", { name: /policy/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /briefing-notes/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText("12 chunks ready")).toBeInTheDocument();
     });
   });
 });

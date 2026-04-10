@@ -1,56 +1,20 @@
 "use client";
 
-import { startTransition, useEffect, useId, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { startTransition, useEffect, useId, useRef, useState } from "react";
 import { fetchDocuments, sendQuestion, uploadDocument } from "@/lib/api";
 import type { Message, ResourceDocument } from "@/lib/types";
 
-const imgEllipse1 = "https://www.figma.com/api/mcp/asset/0d817736-9c0b-4eb1-beb6-fecb96ecebd0";
-const imgEllipse2 = "https://www.figma.com/api/mcp/asset/5362a6bb-04b5-4e31-bee8-37fae1cc27b1";
-const imgRectangle1 = "https://www.figma.com/api/mcp/asset/fdc7d392-f463-45bb-872f-eaa690992658";
-const imgRectangle2 = "https://www.figma.com/api/mcp/asset/322169c7-972f-4fe2-a08a-84f97774b82a";
-const imgEllipse3 = "https://www.figma.com/api/mcp/asset/6bc739c5-0a80-4c92-9218-a4b87ff93fcb";
-const imgEllipse4 = "https://www.figma.com/api/mcp/asset/47518ef2-029c-49e1-bad3-1ab1212c7c8c";
-const imgEllipse5 = "https://www.figma.com/api/mcp/asset/e5be7d45-6594-4e85-b3a9-efa3c3204fd6";
-const imgEllipse6 = "https://www.figma.com/api/mcp/asset/9e8c0bd0-d351-4f25-a83a-d7f54702ab22";
-const imgEllipse7 = "https://www.figma.com/api/mcp/asset/b4a8c7b5-cec8-4144-aa16-f8ad1bfe4c31";
-const imgEllipse8 = "https://www.figma.com/api/mcp/asset/6280be89-be98-47ef-8e90-874ddf69ee6c";
-const imgFrame = "https://www.figma.com/api/mcp/asset/5ec5ff76-bca6-427c-abda-f121bba4fe75";
-const imgFrame1 = "https://www.figma.com/api/mcp/asset/ceba86e9-6016-40b7-abd7-5dc6581030e2";
-const imgFrame2 = "https://www.figma.com/api/mcp/asset/fc6b8904-4fc7-4482-bc33-ee358d96193c";
-const imgFrame3 = "https://www.figma.com/api/mcp/asset/08d39d25-bb1c-4daf-8431-887b146b3e3e";
-const imgFrame4 = "https://www.figma.com/api/mcp/asset/9787c6a0-56ff-4038-9afa-2c145db55bf1";
-const imgFrame5 = "https://www.figma.com/api/mcp/asset/c7723612-9e83-4927-9a5c-b10cf5e30800";
-const imgFrame6 = "https://www.figma.com/api/mcp/asset/26553f70-2f95-4bcb-aba7-bfc95d1ad674";
-const imgFrame7 = "https://www.figma.com/api/mcp/asset/211564e4-9f48-4eb5-80e3-bf393da51820";
-const imgFrame8 = "https://www.figma.com/api/mcp/asset/f9716c24-d248-493b-8edc-043c7bec7f8f";
-const imgFrame9 = "https://www.figma.com/api/mcp/asset/41846e4d-86ab-4691-8724-5c94f54ac12b";
-const imgWindowControl = "https://www.figma.com/api/mcp/asset/373e6dc0-a204-400c-98e9-8b6da2274b47";
-
-const avatarPool = [imgEllipse3, imgEllipse4, imgEllipse5, imgEllipse6, imgEllipse7, imgEllipse8];
-
-const fallbackContacts = [
-  { name: "Elanor", subtitle: "lorem ipsum dolr", avatar: imgEllipse3 },
-  { name: "Alvin", subtitle: "lorem ipsum dolr", avatar: imgEllipse4 },
-  { name: "Summer", subtitle: "lorem ipsum dolr", avatar: imgEllipse5 },
-  { name: "Greg", subtitle: "lorem ipsum dolr", avatar: imgEllipse6 },
-  { name: "Walt", subtitle: "lorem ipsum dolr", avatar: imgEllipse7 },
-  { name: "Jesse", subtitle: "lorem ipsum dolr", avatar: imgEllipse8 },
+const quickPrompts = [
+  "Summarize the strongest claims in this PDF.",
+  "List every date, name, and number worth checking.",
+  "Which section sounds the least supported by evidence?",
 ];
 
-const sampleTranscript = [
-  { kind: "assistant", text: "okay, see ya at 6" },
-  { kind: "divider", text: "Yesterday, 18:04" },
-  { kind: "user", text: "heyy" },
-  { kind: "user", text: "i've arrived" },
-  { kind: "divider", text: "Today, 12:21" },
-  { kind: "assistant", text: "heyyy" },
-  { kind: "assistant", text: "can you send me the photos from yesterday?" },
-  { kind: "assistant", text: "greg really likes them :)" },
-  { kind: "user", text: "here you go" },
-  { kind: "gallery" },
-  { kind: "user", text: "they look pretty good" },
-  { kind: "assistant", text: "hahaha sure" },
-  { kind: "assistant", text: "thanks a bunch!" },
+const retrievalNotes = [
+  "PDFs are indexed before the assistant can answer.",
+  "Responses are grounded in retrieved chunks only.",
+  "Citations stay attached to the response that used them.",
 ];
 
 function formatDate(rawDate: string) {
@@ -79,6 +43,19 @@ function trimFileExtension(filename: string) {
   return filename.replace(/\.[^.]+$/, "");
 }
 
+function makeDocumentBadge(filename: string) {
+  const parts = trimFileExtension(filename)
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (parts.length === 0) {
+    return "PDF";
+  }
+
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
+}
+
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -93,24 +70,12 @@ function describeError(error: unknown) {
   return "Connection failed. Please try again.";
 }
 
-function makeDocumentSubtitle(document: ResourceDocument) {
-  return `${document.chunk_count} chunks ready`;
-}
-
-type RailRow = {
-  key: string;
-  label: string;
-  sublabel: string;
-  avatar: string;
-  documentId?: number;
-};
-
 export default function ResourceWorkspace() {
   const [documents, setDocuments] = useState<ResourceDocument[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<"idle" | "uploading" | "processing" | "success">(
     "idle",
@@ -121,26 +86,11 @@ export default function ResourceWorkspace() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const fileInputId = useId();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void loadDocuments();
   }, []);
-
-  useEffect(() => {
-    setSelectedDocumentId((current) => {
-      if (documents.length === 0) {
-        return null;
-      }
-
-      if (current && documents.some((document) => document.id === current)) {
-        return current;
-      }
-
-      return documents[0].id;
-    });
-  }, [documents]);
 
   useEffect(() => {
     const node = transcriptRef.current;
@@ -186,7 +136,6 @@ export default function ResourceWorkspace() {
 
   async function handleUpload() {
     if (!selectedFile) {
-      fileInputRef.current?.click();
       setUploadError("Choose a PDF before processing.");
       return;
     }
@@ -263,7 +212,7 @@ export default function ResourceWorkspace() {
         {
           id: assistantId,
           sender: "assistant",
-          text: "Searching index and grounding response...",
+          text: "Searching the index and grounding a response...",
           citations: [],
           pending: true,
         },
@@ -312,308 +261,398 @@ export default function ResourceWorkspace() {
     }
   }
 
-  const selectedDocument =
-    documents.find((document) => document.id === selectedDocumentId) ?? documents[0] ?? null;
+  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const nextFile = event.dataTransfer.files?.[0];
+    rememberFile(nextFile ?? null);
+  }
 
-  const railRows = useMemo<RailRow[]>(() => {
-    const documentRows = documents.slice(0, 6).map((document, index) => ({
-      key: `doc-${document.id}`,
-      label: trimFileExtension(document.filename),
-      sublabel: makeDocumentSubtitle(document),
-      avatar: avatarPool[index % avatarPool.length],
-      documentId: document.id,
-    }));
-
-    if (documentRows.length >= 6) {
-      return documentRows;
-    }
-
-    return [...documentRows, ...fallbackContacts.slice(documentRows.length).map((item, index) => ({
-      key: `fallback-${index}`,
-      label: item.name,
-      sublabel: item.subtitle,
-      avatar: item.avatar,
-    }))];
-  }, [documents]);
-
-  const conversationName = selectedDocument ? trimFileExtension(selectedDocument.filename) : "Elanor";
-  const displayedMessages = messages.length === 0 ? sampleTranscript : null;
-  const activeProgressWidth =
-    uploadState === "processing" ? "100%" : `${Math.max(uploadProgress, uploadState === "success" ? 100 : 4)}%`;
+  const latestDocument = documents[0] ?? null;
+  const totalChunks = documents.reduce((sum, document) => sum + document.chunk_count, 0);
+  const statusLabel =
+    uploadState === "uploading"
+      ? "Uploading"
+      : uploadState === "processing"
+        ? "Processing"
+        : uploadState === "success"
+          ? "Indexed"
+          : "Standby";
 
   return (
-    <div className="workspace-frame workspace-frame-figma">
-      <input
-        aria-label="Choose PDF file"
-        className="sr-only"
-        id={fileInputId}
-        type="file"
-        accept="application/pdf"
-        onChange={(event) => rememberFile(event.target.files?.[0] ?? null)}
-        ref={fileInputRef}
-      />
-
-      <div className="figma-message-shell" data-name="Message" data-node-id="611:97">
-        <div className="figma-window-control">
-          <img alt="" className="figma-full-img" src={imgWindowControl} />
-        </div>
-
-        <button
-          className="figma-avatar-home"
-          onClick={() => fileInputRef.current?.click()}
-          type="button"
-        >
-          <img alt="" className="figma-full-img" src={imgEllipse1} />
-          <span className="sr-only">Choose PDF file</span>
-        </button>
-
-        <nav className="figma-menu" aria-label="Workspace shortcuts">
-          <button className="figma-menu-item figma-menu-item-active" onClick={handleUpload} type="button">
-            <div className="figma-menu-icon-wrap">
-              <img alt="" className="figma-full-img" src={imgFrame} />
+    <div className="workspace-frame">
+      <div className="workspace-app">
+        <aside className="workspace-sidebar">
+          <section className="brand-block">
+            <div className="brand-mark" aria-hidden="true">
+              RS
             </div>
-            <span className="sr-only">Index document</span>
-          </button>
-          <button
-            className="figma-menu-item"
-            onClick={() => {
-              void loadDocuments();
-            }}
-            type="button"
-          >
-            <div className="figma-menu-icon-wrap">
-              <img alt="" className="figma-full-img" src={imgFrame1} />
+            <div className="brand-copy">
+              <p className="section-kicker">Evidence desk</p>
+              <h1 className="brand-name">ReSource</h1>
+              <p className="brand-description">
+                A calmer interface for indexing PDFs and questioning the record without the visual noise.
+              </p>
             </div>
-            <span className="sr-only">Refresh documents</span>
-          </button>
-          <button className="figma-menu-item" onClick={() => setQuestion("Summarize the strongest claims in this PDF.")} type="button">
-            <div className="figma-menu-icon-wrap">
-              <img alt="" className="figma-full-img" src={imgFrame2} />
-            </div>
-            <span className="sr-only">Use quick prompt</span>
-          </button>
-          <button className="figma-menu-item" onClick={() => transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" })} type="button">
-            <div className="figma-menu-icon-wrap">
-              <img alt="" className="figma-full-img" src={imgFrame3} />
-            </div>
-            <span className="sr-only">Jump to latest message</span>
-          </button>
-        </nav>
+          </section>
 
-        <div className="figma-main-frame">
-          <div className="figma-chat-list-pane">
-            <p className="figma-chats-title">Chats</p>
-
-            <div className="figma-chat-list" aria-live="polite">
-              {railRows.map((row, index) => {
-                const isActive =
-                  row.documentId != null
-                    ? selectedDocument?.id === row.documentId
-                    : selectedDocument == null && index === 0;
-
-                return (
-                  <button
-                    className={`figma-chat-row ${isActive ? "figma-chat-row-active" : ""}`}
-                    key={row.key}
-                    onClick={() => {
-                      if (row.documentId != null) {
-                        setSelectedDocumentId(row.documentId);
-                      }
-                    }}
-                    type="button"
-                  >
-                    <div className="figma-chat-row-avatar">
-                      <img alt="" className="figma-full-img" src={row.avatar} />
-                    </div>
-                    <div className="figma-chat-row-text">
-                      <p className="figma-chat-row-name">{row.label}</p>
-                      <p className="figma-chat-row-subtitle">{row.sublabel}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {documentsLoading ? <p className="sr-only">Loading documents</p> : null}
-            {documentsError ? <p className="sr-only">{documentsError}</p> : null}
-            {documents.length === 0 ? <p className="sr-only">No sources indexed</p> : null}
-            {selectedFile ? <p className="sr-only">Selected file {selectedFile.name}</p> : null}
-            {uploadError ? <p className="sr-only">{uploadError}</p> : null}
-          </div>
-
-          <section className="figma-conversation-pane">
-            <header className="figma-conversation-header">
-              <div className="figma-conversation-avatar">
-                <img alt="" className="figma-full-img" src={imgEllipse2} />
+          <section className="panel panel-upload">
+            <div className="panel-header">
+              <div className="panel-title-wrap">
+                <p className="section-kicker">Intake</p>
+                <h2 className="panel-title">Index a document</h2>
               </div>
-              <p className="figma-conversation-name">{conversationName}</p>
+              <span className="toolbar-pill">{statusLabel}</span>
+            </div>
 
+            <div
+              className={`upload-dropzone ${dragActive ? "upload-dropzone-active" : ""}`}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  return;
+                }
+                setDragActive(false);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleDrop}
+            >
+              <input
+                aria-label="Choose PDF file"
+                className="sr-only"
+                id={fileInputId}
+                type="file"
+                accept="application/pdf"
+                onChange={(event) => rememberFile(event.target.files?.[0] ?? null)}
+              />
+
+              <div className="upload-copy">
+                <p className="upload-title">Drop a PDF here or pick one manually.</p>
+                <p className="upload-body">
+                  Keep the ingestion step blunt: one file in, one clean path to retrieval and citation.
+                </p>
+              </div>
+
+              <div className="upload-actions">
+                <label className="command-button button-secondary dropzone-trigger" htmlFor={fileInputId}>
+                  Choose PDF
+                </label>
+                <button
+                  className="command-button button-primary"
+                  disabled={uploadState === "uploading" || uploadState === "processing"}
+                  onClick={() => {
+                    void handleUpload();
+                  }}
+                  type="button"
+                >
+                  {uploadState === "uploading"
+                    ? "Uploading..."
+                    : uploadState === "processing"
+                      ? "Processing..."
+                      : "Index document"}
+                </button>
+              </div>
+
+              <div className="upload-summary">
+                <div className="upload-summary-block">
+                  <p className="upload-label">Selected file</p>
+                  <p className="upload-value">{selectedFile ? selectedFile.name : "No file selected"}</p>
+                </div>
+                <div className="upload-summary-block">
+                  <p className="upload-label">Size</p>
+                  <p className="upload-value">{selectedFile ? formatFileSize(selectedFile.size) : "PDF only"}</p>
+                </div>
+              </div>
+
+              <div className="progress-track" aria-hidden="true">
+                <div
+                  className="progress-fill"
+                  style={{
+                    width:
+                      uploadState === "processing"
+                        ? "100%"
+                        : `${Math.max(uploadProgress, uploadState === "success" ? 100 : 4)}%`,
+                  }}
+                />
+              </div>
+
+              {uploadError ? <p className="inline-feedback inline-feedback-error">{uploadError}</p> : null}
+            </div>
+          </section>
+
+          <section className="panel panel-library">
+            <div className="panel-header">
+              <div className="panel-title-wrap">
+                <p className="section-kicker">Library</p>
+                <h2 className="panel-title">Indexed documents</h2>
+              </div>
               <button
-                className="figma-top-action"
+                className="command-button button-secondary panel-action-button"
                 onClick={() => {
                   void loadDocuments();
                 }}
                 type="button"
               >
-                <div className="figma-top-action-icon">
-                  <img alt="" className="figma-full-img" src={imgFrame6} />
-                </div>
-                <span className="sr-only">Refresh documents</span>
+                Refresh
               </button>
-              <button className="figma-top-action figma-top-action-secondary" onClick={handleUpload} type="button">
-                <div className="figma-top-action-icon">
-                  <img alt="" className="figma-full-img" src={imgFrame4} />
-                </div>
-                <span className="sr-only">Index document</span>
-              </button>
-            </header>
-
-            <div className="figma-status-strip">
-              <div className="figma-progress-track" aria-hidden="true">
-                <div className="figma-progress-fill" style={{ width: activeProgressWidth }} />
-              </div>
-              <div className="figma-status-copy">
-                <span>{selectedDocument ? formatDate(selectedDocument.upload_date) : "Standby"}</span>
-                <span>{selectedDocument ? `${selectedDocument.chunk_count} chunks` : uploadState}</span>
-                <span>{selectedFile ? formatFileSize(selectedFile.size) : "PDF only"}</span>
-              </div>
             </div>
 
-            <div className="figma-transcript" ref={transcriptRef}>
-              {displayedMessages ? (
-                <>
-                  {displayedMessages.map((entry, index) => {
-                    if (entry.kind === "divider") {
-                      return (
-                        <div className="figma-divider" key={`divider-${index}`}>
-                          <div className="figma-divider-line" />
-                          <p className="figma-divider-text">{entry.text}</p>
-                          <div className="figma-divider-line" />
-                        </div>
-                      );
-                    }
+            <div className="panel-copy">
+              Every file in the record stays visible here with its ingestion date and chunk count.
+            </div>
 
-                    if (entry.kind === "gallery") {
-                      return (
-                        <div className="figma-bubble-stack figma-bubble-stack-user" key={`gallery-${index}`}>
-                          <div className="figma-gallery">
-                            <div className="figma-gallery-image">
-                              <img alt="" className="figma-gallery-photo" src={imgRectangle1} />
-                            </div>
-                            <div className="figma-gallery-image">
-                              <img alt="" className="figma-gallery-photo" src={imgRectangle2} />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        className={`figma-bubble-stack ${
-                          entry.kind === "user" ? "figma-bubble-stack-user" : "figma-bubble-stack-assistant"
-                        }`}
-                        key={`sample-${index}`}
-                      >
-                        <div
-                          className={`figma-bubble ${
-                            entry.kind === "user" ? "figma-bubble-user" : "figma-bubble-assistant"
-                          }`}
-                        >
-                          <p className="figma-bubble-text">{entry.text}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <div className="figma-popup-menu" aria-hidden="true">
-                    <div className="figma-popup-row">
-                      <div className="figma-popup-icon">
-                        <img alt="" className="figma-full-img" src={imgFrame7} />
-                      </div>
-                      <p className="figma-popup-text">Pin</p>
-                    </div>
-                    <div className="figma-popup-row">
-                      <div className="figma-popup-icon">
-                        <img alt="" className="figma-full-img" src={imgFrame8} />
-                      </div>
-                      <p className="figma-popup-text figma-popup-text-danger">Remove message</p>
-                    </div>
-                    <div className="figma-popup-row">
-                      <div className="figma-popup-icon">
-                        <img alt="" className="figma-full-img" src={imgFrame9} />
-                      </div>
-                      <p className="figma-popup-text figma-popup-text-danger">Delete message</p>
-                    </div>
+            <div className="library-scroll">
+              {documentsLoading ? (
+                <div className="empty-state">
+                  <div className="skeleton-stack" aria-hidden="true">
+                    {[0, 1, 2].map((row) => (
+                      <div className="skeleton-bar" key={row} />
+                    ))}
                   </div>
-                </>
+                </div>
+              ) : documentsError ? (
+                <p className="inline-feedback inline-feedback-error">{documentsError}</p>
+              ) : documents.length === 0 ? (
+                <div className="empty-state">
+                  <p className="empty-title">Library is empty</p>
+                  <p className="empty-copy">
+                    Upload the first PDF and this list becomes the permanent record for every indexed file.
+                  </p>
+                </div>
               ) : (
-                <>
+                <ol className="document-list">
+                  {documents.map((document, index) => (
+                    <li
+                      className={`document-row ${index === 0 ? "document-row-current" : ""}`}
+                      key={document.id}
+                    >
+                      <div className="document-badge" aria-hidden="true">
+                        {makeDocumentBadge(document.filename)}
+                      </div>
+                      <div className="document-main">
+                        <p className="document-name">{document.filename}</p>
+                        <p className="document-meta">Indexed {formatDate(document.upload_date)}</p>
+                      </div>
+                      <div className="document-count">{document.chunk_count} chunks</div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </section>
+        </aside>
+
+        <section className="conversation-panel">
+          <header className="conversation-topbar">
+            <div className="conversation-header">
+              <p className="section-kicker">Grounded chat</p>
+              <h2 className="conversation-title">Question the record in one clean thread.</h2>
+              <p className="conversation-copy">
+                Ask for summaries, factual checks, or precise details. The assistant responds only after
+                retrieval has done its job.
+              </p>
+            </div>
+
+            <div className="status-cluster" aria-label="Workspace overview">
+              <div className="status-chip">
+                <span className="status-chip-label">Documents</span>
+                <span className="status-chip-value">{documents.length}</span>
+              </div>
+              <div className="status-chip">
+                <span className="status-chip-label">Chunks</span>
+                <span className="status-chip-value">{totalChunks}</span>
+              </div>
+              <div className="status-chip">
+                <span className="status-chip-label">Mode</span>
+                <span className="status-chip-value">RAG</span>
+              </div>
+            </div>
+          </header>
+
+          <div className="conversation-stage">
+            <div className="transcript-surface" ref={transcriptRef}>
+              {messages.length === 0 ? (
+                <div className="empty-conversation">
+                  <p className="empty-title">
+                    {documents.length === 0 ? "Start with a document." : "The index is ready."}
+                  </p>
+                  <p className="empty-copy">
+                    {documents.length === 0
+                      ? "Once a PDF is indexed, this thread becomes the answer surface for summaries, checks, and citations."
+                      : "Ask a direct question, request a summary, or pressure-test a claim."}
+                  </p>
+
+                  {documents.length > 0 ? (
+                    <div className="prompt-row">
+                      {quickPrompts.map((prompt) => (
+                        <button
+                          className="prompt-chip"
+                          key={prompt}
+                          onClick={() => setQuestion(prompt)}
+                          type="button"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="message-thread">
                   {messages.map((message) => (
-                    <div
-                      className={`figma-bubble-stack ${
-                        message.sender === "user" ? "figma-bubble-stack-user" : "figma-bubble-stack-assistant"
-                      }`}
+                    <article
+                      className={`message-card ${
+                        message.sender === "user" ? "message-user" : "message-assistant"
+                      } ${message.pending ? "message-pending" : ""}`}
                       key={message.id}
                     >
-                      <div
-                        className={`figma-bubble ${
-                          message.sender === "user" ? "figma-bubble-user" : "figma-bubble-assistant"
-                        } ${message.pending ? "figma-bubble-pending" : ""}`}
-                      >
-                        <p className="figma-bubble-text">{message.text}</p>
-                        {message.citations.length > 0 ? (
-                          <div className="figma-citation-list">
-                            {message.citations.map((citation) => (
-                              <span className="figma-citation-chip" key={`${message.id}-${citation}`}>
-                                {citation}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
+                      <div className="message-meta">
+                        <span>{message.sender === "user" ? "You" : "ReSource"}</span>
+                        <span>{message.pending ? "Working" : "Delivered"}</span>
                       </div>
-                    </div>
+                      <p className="message-text">{message.text}</p>
+                      {message.citations.length > 0 ? (
+                        <div className="citation-row">
+                          {message.citations.map((citation) => (
+                            <span className="citation-chip" key={`${message.id}-${citation}`}>
+                              {citation}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </article>
                   ))}
-                </>
+                </div>
               )}
             </div>
 
-            <form
-              className="figma-composer"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleQuestionSubmit();
-              }}
-            >
-              <label className="sr-only" htmlFor="resource-question">
-                Ask a question
-              </label>
-              <textarea
-                className="figma-composer-input"
-                id="resource-question"
-                onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleQuestionSubmit();
-                  }
-                }}
-                placeholder="Type a message"
-                rows={1}
-                value={question}
-              />
-              <button className="figma-send-button" type="submit">
-                <div className="figma-send-icon">
-                  <img alt="" className="figma-full-img" src={imgFrame5} />
-                </div>
-                <span className="sr-only">Ask ReSource</span>
-              </button>
-            </form>
+            <div className="composer-shell">
+              <div className="input-group">
+                <label className="composer-label" htmlFor="question">
+                  Ask a question
+                </label>
+                <textarea
+                  className="field"
+                  id="question"
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void handleQuestionSubmit();
+                    }
+                  }}
+                  placeholder="Ask for a summary, a citation trail, or a detail check."
+                  value={question}
+                />
+                <p className="form-helper">Press Enter to send. Use Shift+Enter for a line break.</p>
+              </div>
 
-            {chatError ? <p className="figma-hidden-status">{chatError}</p> : null}
+              {chatError ? <p className="inline-feedback inline-feedback-error">{chatError}</p> : null}
+
+              <div className="composer-actions">
+                <p className="composer-note">
+                  {chatLoading
+                    ? "Retrieving relevant chunks and grounding the response."
+                    : "Answers stay attached to the uploaded record."}
+                </p>
+                <button
+                  className="command-button button-primary composer-submit"
+                  disabled={chatLoading}
+                  onClick={() => {
+                    void handleQuestionSubmit();
+                  }}
+                  type="button"
+                >
+                  {chatLoading ? "Searching..." : "Ask ReSource"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside className="workspace-inspector">
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title-wrap">
+                <p className="section-kicker">Record snapshot</p>
+                <h2 className="panel-title">What the workspace knows right now</h2>
+              </div>
+            </div>
+
+            <div className="stat-list">
+              <div className="stat-row">
+                <span className="stat-label">Latest document</span>
+                <span className="stat-value">
+                  {latestDocument ? trimFileExtension(latestDocument.filename) : "No documents yet"}
+                </span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">Last indexed</span>
+                <span className="stat-value">
+                  {latestDocument ? formatDate(latestDocument.upload_date) : "Waiting for first upload"}
+                </span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">Chunks available</span>
+                <span className="stat-value">{totalChunks}</span>
+              </div>
+            </div>
           </section>
-        </div>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title-wrap">
+                <p className="section-kicker">Shortcuts</p>
+                <h2 className="panel-title">Prompt starters</h2>
+              </div>
+            </div>
+            <div className="quick-list">
+              {quickPrompts.map((prompt) => (
+                <button
+                  className="prompt-chip prompt-chip-block"
+                  key={prompt}
+                  onClick={() => setQuestion(prompt)}
+                  type="button"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title-wrap">
+                <p className="section-kicker">Guardrails</p>
+                <h2 className="panel-title">How answers are produced</h2>
+              </div>
+            </div>
+            <ol className="steps-list">
+              {retrievalNotes.map((note) => (
+                <li className="steps-item" key={note}>
+                  {note}
+                </li>
+              ))}
+            </ol>
+          </section>
+        </aside>
       </div>
+
+      <footer className="workspace-footer">
+        <p className="footer-copy">Grounded PDF retrieval, cleaner surfaces, less visual friction.</p>
+        <div className="footer-links">
+          <Link className="legal-link" href="/privacy">
+            Privacy
+          </Link>
+          <Link className="legal-link" href="/terms">
+            Terms
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 }
