@@ -1,4 +1,10 @@
-import type { ChatResponse, ResourceDocument, UploadResponse } from "@/lib/types";
+import type {
+  ConversationDetail,
+  ConversationSummary,
+  DocumentSummary,
+  SendMessageResponse,
+  UploadResponse,
+} from "@/lib/types";
 
 const baseUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000").replace(/\/$/, "");
 
@@ -11,33 +17,62 @@ async function parseError(response: Response) {
   }
 }
 
-export async function fetchDocuments() {
-  const response = await fetch(`${baseUrl}/documents`, {
-    method: "GET",
+async function requestJson<T>(input: string, init?: RequestInit) {
+  const response = await fetch(`${baseUrl}${input}`, {
     cache: "no-store",
+    ...init,
   });
 
   if (!response.ok) {
     throw new Error(await parseError(response));
   }
 
-  return (await response.json()) as ResourceDocument[];
+  return (await response.json()) as T;
 }
 
-export async function sendQuestion(question: string) {
-  const response = await fetch(`${baseUrl}/chat`, {
+export function getDocumentFileUrl(documentId: number) {
+  return `${baseUrl}/documents/${documentId}/file`;
+}
+
+export function fetchDocuments() {
+  return requestJson<DocumentSummary[]>("/documents");
+}
+
+export function fetchConversations() {
+  return requestJson<ConversationSummary[]>("/conversations");
+}
+
+export function createConversation() {
+  return requestJson<ConversationDetail>("/conversations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+export function fetchConversation(conversationId: number) {
+  return requestJson<ConversationDetail>(`/conversations/${conversationId}`);
+}
+
+export function updateConversationDocuments(conversationId: number, documentIds: number[]) {
+  return requestJson<DocumentSummary[]>(`/conversations/${conversationId}/active-documents`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
+}
+
+export function sendMessage(conversationId: number, question: string) {
+  return requestJson<SendMessageResponse>(`/conversations/${conversationId}/messages`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ question }),
   });
-
-  if (!response.ok) {
-    throw new Error(await parseError(response));
-  }
-
-  return (await response.json()) as ChatResponse;
 }
 
 export function uploadDocument(file: File, onProgress?: (progress: number) => void) {

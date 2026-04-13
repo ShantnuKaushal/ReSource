@@ -5,8 +5,8 @@ export default function TermsPage() {
     <main className="legal-shell" id="content">
       <div className="legal-panel">
         <div className="legal-header">
-          <p className="section-kicker">Terms</p>
-          <h1 className="legal-title">Use the workspace like a retrieval tool, not an oracle.</h1>
+          <p className="legal-kicker">Terms</p>
+          <h1 className="legal-title">Use the workspace as a retrieval tool, not as final authority.</h1>
         </div>
         <div className="legal-body">
           <p>
@@ -24,11 +24,11 @@ export default function TermsPage() {
           </p>
         </div>
         <div className="legal-actions">
-          <Link className="command-button button-primary" href="/">
+          <Link className="button button-primary" href="/">
             Back to workspace
           </Link>
-          <Link className="back-link" href="/">
-            Return home
+          <Link className="legal-link" href="/">
+            Home
           </Link>
         </div>
       </div>

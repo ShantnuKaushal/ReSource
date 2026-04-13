@@ -5,8 +5,8 @@ export default function PrivacyPage() {
     <main className="legal-shell" id="content">
       <div className="legal-panel">
         <div className="legal-header">
-          <p className="section-kicker">Privacy</p>
-          <h1 className="legal-title">The workspace stays close to your documents.</h1>
+          <p className="legal-kicker">Privacy</p>
+          <h1 className="legal-title">Your files stay tied to the retrieval workspace.</h1>
         </div>
         <div className="legal-body">
           <p>
@@ -25,11 +25,11 @@ export default function PrivacyPage() {
           </p>
         </div>
         <div className="legal-actions">
-          <Link className="command-button button-primary" href="/">
+          <Link className="button button-primary" href="/">
             Back to workspace
           </Link>
-          <Link className="back-link" href="/">
-            Return home
+          <Link className="legal-link" href="/">
+            Home
           </Link>
         </div>
       </div>
