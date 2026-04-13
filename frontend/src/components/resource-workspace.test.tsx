@@ -49,6 +49,9 @@ const conversations = [
   },
 ];
 
+const showcaseQuestion =
+  "What are the critical risks and compliance implications highlighted within these documents?";
+
 function makeConversationDetail(conversationId: number) {
   if (conversationId === 8) {
     return {
@@ -148,6 +151,8 @@ class UploadSuccessXHR {
 describe("ResourceWorkspace", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    window.localStorage.removeItem("resource-workspace-theme");
+    delete document.documentElement.dataset.theme;
     window.history.replaceState({}, "", "/");
   });
 
@@ -437,5 +442,85 @@ describe("ResourceWorkspace", () => {
     expect(await screen.findByRole("heading", { name: "Recommended stack" })).toBeInTheDocument();
     expect(screen.getByText("FastAPI for the API layer")).toBeInTheDocument();
     expect(screen.getByText("PostgreSQL for storage")).toBeInTheDocument();
+  });
+
+  it("toggles dark mode and keeps the featured analysis accessible", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith("/documents")) {
+          return jsonResponse(documents);
+        }
+
+        if (url.endsWith("/conversations")) {
+          return jsonResponse(conversations);
+        }
+
+        if (url.endsWith("/conversations/7")) {
+          return jsonResponse(makeConversationDetail(7));
+        }
+
+        throw new Error(`Unhandled fetch: ${url}`);
+      }),
+    );
+
+    render(<ResourceWorkspace />);
+
+    expect(await screen.findByText("Use the OpenAI SDK, environment variables, and a prompt handler.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Switch to dark mode" }));
+
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe("dark");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Featured Analysis" }));
+
+    expect(await screen.findByText(showcaseQuestion)).toBeInTheDocument();
+  });
+
+  it("renders the featured analysis screen and returns to a real conversation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith("/documents")) {
+          return jsonResponse(documents);
+        }
+
+        if (url.endsWith("/conversations")) {
+          return jsonResponse(conversations);
+        }
+
+        if (url.endsWith("/conversations/7")) {
+          return jsonResponse(makeConversationDetail(7));
+        }
+
+        if (url.endsWith("/conversations/8")) {
+          return jsonResponse(makeConversationDetail(8));
+        }
+
+        throw new Error(`Unhandled fetch: ${url}`);
+      }),
+    );
+
+    render(<ResourceWorkspace />);
+
+    expect(await screen.findByText("Use the OpenAI SDK, environment variables, and a prompt handler.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Featured Analysis" }));
+
+    expect(await screen.findByText(showcaseQuestion)).toBeInTheDocument();
+    expect(screen.getByText("Executive Compliance Summary")).toBeInTheDocument();
+    expect(screen.getByText(/I\. DATA SOVEREIGNTY VIOLATION/)).toBeInTheDocument();
+    expect(screen.getByText(/II\. AUTHENTICATION REDUNDANCY/)).toBeInTheDocument();
+    expect(screen.getByText(/III\. POLICY ALIGNMENT/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask about the active PDFs...")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Auth Review" }));
+
+    expect(await screen.findByText("OAuth 2.0 and OpenID Connect are used for authentication.")).toBeInTheDocument();
   });
 });

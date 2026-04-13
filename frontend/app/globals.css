@@ -21,6 +21,48 @@
   --radius-full: 9999px;
 }
 
+:root {
+  --workspace-elevated: #ffffff;
+  --workspace-elevated-muted: rgba(255, 255, 255, 0.76);
+  --workspace-elevated-strong: rgba(255, 255, 255, 0.84);
+  --workspace-card-start: rgba(255, 255, 255, 0.98);
+  --workspace-card-end: rgba(248, 247, 242, 0.82);
+  --workspace-warning-start: rgba(255, 251, 235, 0.94);
+  --workspace-warning-end: rgba(255, 255, 255, 0.98);
+  --workspace-preview-start: rgba(255, 255, 255, 0.99);
+  --workspace-preview-end: rgba(246, 248, 251, 0.92);
+  --workspace-danger-soft: #fef2f2;
+  --workspace-danger-text: #dc2626;
+  --workspace-danger-border: #fecaca;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --color-primary: #8f86ff;
+  --color-primary-container: #2a2558;
+  --color-on-primary: #f8f7ff;
+  --color-secondary: #c8b58b;
+  --color-secondary-container: #2a2418;
+  --color-surface: #0f1117;
+  --color-surface-container: #151923;
+  --color-surface-container-low: #1a2030;
+  --color-on-surface: #edf1fb;
+  --color-on-surface-variant: #9ea9c1;
+  --color-outline-variant: #2a3142;
+  --workspace-elevated: #171c28;
+  --workspace-elevated-muted: rgba(23, 28, 40, 0.84);
+  --workspace-elevated-strong: rgba(23, 28, 40, 0.96);
+  --workspace-card-start: rgba(25, 31, 45, 0.98);
+  --workspace-card-end: rgba(17, 21, 32, 0.94);
+  --workspace-warning-start: rgba(71, 46, 24, 0.56);
+  --workspace-warning-end: rgba(25, 31, 45, 0.96);
+  --workspace-preview-start: rgba(25, 31, 45, 0.98);
+  --workspace-preview-end: rgba(18, 23, 35, 0.96);
+  --workspace-danger-soft: rgba(239, 68, 68, 0.14);
+  --workspace-danger-text: #fca5a5;
+  --workspace-danger-border: rgba(248, 113, 113, 0.28);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -33,8 +75,8 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: "Inter", sans-serif;
-  background: #faf9f6;
-  color: #2d2d2d;
+  background: var(--color-surface);
+  color: var(--color-on-surface);
   text-rendering: optimizeLegibility;
 }
 
@@ -73,7 +115,7 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #e0ddd5;
+  background: var(--color-outline-variant);
   border-radius: 10px;
 }
 
@@ -106,7 +148,7 @@ a {
   transform: translateY(-150%);
   padding: 0.75rem 1rem;
   border-radius: 9999px;
-  background: white;
+  background: var(--workspace-elevated);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
   text-decoration: none;
   transition: transform 140ms ease;

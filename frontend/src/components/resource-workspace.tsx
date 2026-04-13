@@ -24,12 +24,66 @@ import type { ChatMessage, ConversationSummary, DocumentSummary, PendingMessage 
 
 type StageMode = "chat" | "preview";
 type ThreadMessage = ChatMessage | PendingMessage;
+type ConversationSelection = number | typeof SHOWCASE_CHAT_ID | null;
+type WorkspaceTheme = "light" | "dark";
 type MessageBlock =
   | { type: "heading"; level: 2 | 3; text: string }
   | { type: "paragraph"; text: string }
   | { type: "bullet-list"; items: string[] }
   | { type: "number-list"; items: string[] }
   | { type: "quote"; text: string };
+type ShowcaseScopeDocument = {
+  filename: string;
+  tone: "regulatory" | "internal";
+};
+type ComplianceTone = "high" | "medium" | "compliant";
+type ComplianceSection = {
+  title: string;
+  status: string;
+  tone: ComplianceTone;
+  items: string[];
+};
+
+const SHOWCASE_CHAT_ID = "featured-analysis";
+const SHOWCASE_CHAT_TITLE = "Featured Analysis";
+const THEME_STORAGE_KEY = "resource-workspace-theme";
+const SHOWCASE_CHAT_QUESTION =
+  "What are the critical risks and compliance implications highlighted within these documents?";
+const SHOWCASE_SCOPE_DOCUMENTS: ShowcaseScopeDocument[] = [
+  { filename: "regulatory_framework.pdf", tone: "regulatory" },
+  { filename: "internal_audit_v1.pdf", tone: "internal" },
+];
+const SHOWCASE_COMPLIANCE_SECTIONS: ComplianceSection[] = [
+  {
+    title: "I. DATA SOVEREIGNTY VIOLATION",
+    status: "HIGH RISK",
+    tone: "high",
+    items: [
+      "Identified unauthorized cross-border data transfers in `internal_audit_v1.pdf` (Section 4.2).",
+      "Non-compliance with GDPR Article 44 regarding secure transfer protocols.",
+      "Immediate remediation required to avoid Tier 2 regulatory penalties.",
+    ],
+  },
+  {
+    title: "II. AUTHENTICATION REDUNDANCY",
+    status: "MEDIUM RISK",
+    tone: "medium",
+    items: [
+      "Legacy OAuth 1.0 protocols still active alongside modern implementations.",
+      "Documentation lacks clear sunsetting dates for deprecated auth endpoints.",
+      "Potential surface area for credential harvesting during fallback flows.",
+    ],
+  },
+  {
+    title: "III. POLICY ALIGNMENT",
+    status: "COMPLIANT",
+    tone: "compliant",
+    items: [
+      "Encryption standards meet or exceed FIPS 140-2 requirements.",
+      "Audit logging coverage is sufficient for quarterly regulatory reporting cycles.",
+    ],
+  },
+];
 
 function describeError(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
@@ -127,6 +181,27 @@ function formatStageTitle(conversation: ConversationSummary | null) {
   }
 
   return conversation.title.trim() || "New conversation";
+}
+
+function isRealConversationId(value: ConversationSelection): value is number {
+  return typeof value === "number";
+}
+
+function getPreferredTheme(): WorkspaceTheme {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (storedTheme === "light" || storedTheme === "dark") {
+    return storedTheme;
+  }
+
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  return "light";
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
@@ -411,6 +486,19 @@ function MaterialIcon({
           <path d="M3 20 21 12 3 4l2.5 6L14 12l-8.5 2Z" fill="currentColor" stroke="none" />
         </svg>
       );
+    case "light_mode":
+      return (
+        <svg {...sharedProps}>
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2.5v2.2M12 19.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" />
+        </svg>
+      );
+    case "dark_mode":
+      return (
+        <svg {...sharedProps}>
+          <path d="M20 14.2A7.8 7.8 0 1 1 9.8 4 6.4 6.4 0 0 0 20 14.2Z" />
+        </svg>
+      );
     default:
       return (
         <span
@@ -430,11 +518,27 @@ function ConversationNav({
   onSelect,
 }: {
   conversations: ConversationSummary[];
-  selectedConversationId: number | null;
-  onSelect: (conversationId: number) => void;
+  selectedConversationId: ConversationSelection;
+  onSelect: (conversationId: ConversationSelection) => void;
 }) {
+  const isShowcaseActive = selectedConversationId === SHOWCASE_CHAT_ID;
+
   return (
     <nav className="space-y-1 overflow-y-auto max-h-full no-scrollbar">
+      <button
+        type="button"
+        onClick={() => onSelect(SHOWCASE_CHAT_ID)}
+        className={
+          isShowcaseActive
+            ? "flex w-full cursor-pointer items-center gap-3 rounded-md bg-primary/10 p-2.5 text-left font-semibold text-primary transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary/12 hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+            : "flex w-full cursor-pointer items-center gap-3 rounded-md p-2.5 text-left text-on-surface-variant transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-container-low hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
+        }
+        aria-pressed={isShowcaseActive}
+        aria-label={SHOWCASE_CHAT_TITLE}
+      >
+        <MaterialIcon icon="auto_awesome" className="text-[18px]" />
+        <span className="truncate text-xs">{SHOWCASE_CHAT_TITLE}</span>
+      </button>
       {conversations.map((conversation) => {
         const isActive = conversation.id === selectedConversationId;
 
@@ -481,12 +585,12 @@ function DocumentLibrary({
             onClick={() => onSelect(document.id)}
             className={
               isActive
-                ? "group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-primary/20 bg-white p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+                ? "group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-primary/20 bg-[var(--workspace-elevated)] p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
                 : "group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-transparent p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:border-outline-variant/30 hover:bg-surface hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
             }
             aria-label={document.filename}
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--workspace-danger-soft)] text-[var(--workspace-danger-text)]">
               <MaterialIcon icon="description" className="text-[20px]" />
             </div>
             <div className="min-w-0">
@@ -522,14 +626,14 @@ function ActiveContext({
       {documents.map((document) => (
         <div
           key={document.id}
-          className="flex items-center gap-2 rounded-lg border border-outline-variant/30 bg-white px-3 py-2 shadow-sm"
+          className="flex items-center gap-2 rounded-lg border border-outline-variant/30 bg-[var(--workspace-elevated)] px-3 py-2 shadow-sm"
         >
           <MaterialIcon icon="description" className="text-[18px] text-primary" />
           <span className="text-[11px] font-semibold text-on-surface">[PDF] {document.filename}</span>
           <button
             type="button"
             onClick={() => onRemove(document.id)}
-            className="ml-1 cursor-pointer rounded-full p-1 transition-all duration-200 hover:-translate-y-0.5 hover:bg-red-50 hover:text-red-500 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+            className="ml-1 cursor-pointer rounded-full p-1 transition-all duration-200 hover:-translate-y-0.5 hover:bg-[var(--workspace-danger-soft)] hover:text-[var(--workspace-danger-text)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
             aria-label={`Remove ${document.filename}`}
           >
             <MaterialIcon icon="close" className="text-[14px]" />
@@ -546,7 +650,7 @@ function ActiveContext({
           <MaterialIcon icon="add" className="text-[18px]" />
         </button>
         {isPickerOpen ? (
-          <div className="absolute left-0 top-11 z-30 w-72 rounded-2xl border border-outline-variant/60 bg-white p-2 shadow-xl">
+          <div className="absolute left-0 top-11 z-30 w-72 rounded-2xl border border-outline-variant/60 bg-[var(--workspace-elevated)] p-2 shadow-xl">
             {availableDocuments.length ? (
               <div className="max-h-64 space-y-1 overflow-y-auto">
                 {availableDocuments.map((document) => (
@@ -557,7 +661,7 @@ function ActiveContext({
                     className="flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-container-low hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
                     aria-label={document.filename}
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--workspace-danger-soft)] text-[var(--workspace-danger-text)]">
                       <MaterialIcon icon="description" className="text-[20px]" />
                     </div>
                     <div className="min-w-0">
@@ -585,7 +689,7 @@ function UserMessage({ message }: { message: ThreadMessage }) {
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_4px_16px_rgba(181,164,109,0.12)]">
         <MaterialIcon icon="person" className="text-[1.25rem] text-primary" />
       </div>
-      <div className="flex-1 rounded-[1.75rem] border border-secondary/30 bg-white/75 px-6 py-5 shadow-[0_10px_30px_rgba(34,36,38,0.04)]">
+      <div className="flex-1 rounded-[1.75rem] border border-secondary/30 bg-[var(--workspace-elevated-muted)] px-6 py-5 shadow-[0_10px_30px_rgba(34,36,38,0.04)]">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-on-surface-variant/55">
           You asked
         </p>
@@ -600,8 +704,8 @@ function AssistantMessage({ message }: { message: ThreadMessage }) {
   const isPending = "pending" in message && Boolean(message.pending);
   const isNotFound = message.text.trim().toLowerCase().startsWith("not found in the uploaded context");
   const cardClassName = isNotFound
-    ? "border-amber-200/80 bg-[linear-gradient(180deg,rgba(255,251,235,0.94),rgba(255,255,255,0.98))] shadow-[0_14px_34px_rgba(217,119,6,0.08)]"
-    : "border-outline-variant/45 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,247,242,0.82))] shadow-[0_18px_40px_rgba(34,36,38,0.06)]";
+    ? "border-amber-200/80 bg-[linear-gradient(180deg,var(--workspace-warning-start),var(--workspace-warning-end))] shadow-[0_14px_34px_rgba(217,119,6,0.08)]"
+    : "border-outline-variant/45 bg-[linear-gradient(180deg,var(--workspace-card-start),var(--workspace-card-end))] shadow-[0_18px_40px_rgba(34,36,38,0.06)]";
   const badgeClassName = isNotFound ? "bg-amber-100 text-amber-800" : "bg-primary/8 text-primary";
 
   return (
@@ -637,7 +741,7 @@ function AssistantMessage({ message }: { message: ThreadMessage }) {
               {citations.map((citation) => (
                 <div
                   key={citation}
-                  className="flex w-fit items-center gap-2 rounded-xl border border-outline-variant/20 bg-white/80 px-3 py-2"
+                  className="flex w-fit items-center gap-2 rounded-xl border border-outline-variant/20 bg-[var(--workspace-elevated-strong)] px-3 py-2"
                 >
                   <MaterialIcon icon="description" className="text-sm text-primary" />
                   <span className="text-[11px] font-semibold text-on-surface-variant">{citation}</span>
@@ -646,6 +750,114 @@ function AssistantMessage({ message }: { message: ThreadMessage }) {
             </div>
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ShowcaseScopeChip({ document }: { document: ShowcaseScopeDocument }) {
+  const toneClassName =
+    document.tone === "regulatory"
+      ? "border-primary/12 bg-[var(--workspace-elevated)] text-on-surface"
+      : "border-outline-variant/30 bg-surface-container-low text-on-surface-variant";
+
+  return (
+    <div className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 shadow-[0_8px_22px_rgba(25,28,30,0.04)] ${toneClassName}`}>
+      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/8 text-primary">
+        <MaterialIcon icon="description" className="text-[12px]" />
+      </div>
+      <span className="text-[11px] font-semibold tracking-[-0.01em]">{document.filename}</span>
+      <MaterialIcon icon="close" className="text-[12px] text-on-surface-variant/55" />
+    </div>
+  );
+}
+
+function ComplianceRiskSection({ section }: { section: ComplianceSection }) {
+  const toneClasses = {
+    high: {
+      accent: "bg-red-500",
+      status: "text-red-500",
+    },
+    medium: {
+      accent: "bg-amber-500",
+      status: "text-amber-500",
+    },
+    compliant: {
+      accent: "bg-emerald-500",
+      status: "text-emerald-600",
+    },
+  }[section.tone];
+
+  return (
+    <div className="relative px-7 py-3">
+      <div className={`absolute left-0 top-0 bottom-0 w-[6px] rounded-full ${toneClasses.accent}`} />
+      <div className="pl-5">
+        <div className="mb-3 flex flex-wrap items-baseline gap-2">
+          <h3 className="text-[13px] font-black uppercase tracking-[0.01em] text-on-surface">{section.title}</h3>
+          <span className="text-[13px] font-black text-on-surface/75" aria-hidden="true">
+            {"—"}
+          </span>
+          <span className={`text-[11px] font-black uppercase tracking-[0.04em] ${toneClasses.status}`}>
+            {section.status}
+          </span>
+        </div>
+        <ul className="space-y-2 pl-7 text-[12px] leading-6 text-on-surface-variant">
+          {section.items.map((item) => (
+            <li key={item} className="list-disc pl-1">
+              {renderInlineMarkdown(item)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function ShowcaseStage() {
+  return (
+    <div className="mx-auto max-w-[1040px]">
+      <div className="mb-6">
+        <p className="mb-3 text-[10px] font-black uppercase tracking-[0.24em] text-on-surface-variant/55">
+          Document Scope
+        </p>
+        <div className="flex flex-wrap gap-3">
+          {SHOWCASE_SCOPE_DOCUMENTS.map((document) => (
+            <ShowcaseScopeChip key={document.filename} document={document} />
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-6 flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_10px_24px_rgba(25,28,30,0.04)]">
+          <MaterialIcon icon="person" className="text-[18px] text-primary" />
+        </div>
+        <div className="pt-2">
+          <p className="max-w-[860px] text-[1.05rem] font-semibold leading-8 tracking-[-0.02em] text-on-surface">
+            {SHOWCASE_CHAT_QUESTION}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-start gap-5">
+        <div className="mt-2 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary shadow-[0_14px_30px_rgba(67,56,202,0.22)] ring-4 ring-primary-container/40">
+          <MaterialIcon icon="auto_awesome" className="text-[1.05rem] text-white" filled />
+        </div>
+        <div className="flex-1 rounded-[2rem] border border-outline-variant/40 bg-[linear-gradient(180deg,var(--workspace-preview-start),var(--workspace-preview-end))] px-8 py-7 shadow-[0_18px_44px_rgba(25,28,30,0.08)]">
+          <div className="mb-5">
+            <p className="text-[1.55rem] font-black uppercase tracking-[-0.04em] text-on-surface">
+              Executive Compliance Summary
+            </p>
+            <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.18em] text-on-surface-variant/50">
+              Review Portal Output
+            </p>
+          </div>
+
+          <div className="space-y-5">
+            {SHOWCASE_COMPLIANCE_SECTIONS.map((section) => (
+              <ComplianceRiskSection key={section.title} section={section} />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -695,13 +907,13 @@ function ChatStage({
 function PreviewStage({ document }: { document: DocumentSummary }) {
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-outline-variant/40 bg-white p-8 shadow-sm">
+      <div className="rounded-3xl border border-outline-variant/40 bg-[var(--workspace-elevated)] p-8 shadow-sm">
         <h2 className="text-xl font-semibold tracking-[-0.01em] text-on-surface">{document.filename}</h2>
         <p className="mt-2 text-sm text-on-surface-variant">
           PDF preview · {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
         </p>
       </div>
-      <div className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-[var(--workspace-elevated)] shadow-sm">
         <iframe
           title={`Preview of ${document.filename}`}
           src={getDocumentFileUrl(document.id)}
@@ -715,9 +927,10 @@ function PreviewStage({ document }: { document: DocumentSummary }) {
 export default function ResourceWorkspace() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const initializedRef = useRef(false);
+  const [theme, setTheme] = useState<WorkspaceTheme>("light");
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<ConversationSelection>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [activeDocuments, setActiveDocuments] = useState<DocumentSummary[]>([]);
   const [draft, setDraft] = useState("");
@@ -729,9 +942,14 @@ export default function ResourceWorkspace() {
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const isShowcaseSelected = selectedConversationId === SHOWCASE_CHAT_ID;
+  const isDarkMode = theme === "dark";
 
   const selectedConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
+    () =>
+      isRealConversationId(selectedConversationId)
+        ? conversations.find((conversation) => conversation.id === selectedConversationId) ?? null
+        : null,
     [conversations, selectedConversationId],
   );
   const previewDocument = useMemo(
@@ -759,6 +977,22 @@ export default function ResourceWorkspace() {
     );
     replaceConversationInUrl(detail.conversation.id);
   }
+
+  useEffect(() => {
+    setTheme(getPreferredTheme());
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.documentElement.dataset.theme = theme;
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     if (initializedRef.current) {
@@ -803,12 +1037,18 @@ export default function ResourceWorkspace() {
     })();
   }, []);
 
-  async function handleSelectConversation(conversationId: number) {
+  async function handleSelectConversation(conversationId: ConversationSelection) {
     setErrorMessage(null);
     setStatusMessage(null);
     setStageMode("chat");
     setPreviewDocumentId(null);
     setIsPickerOpen(false);
+
+    if (!isRealConversationId(conversationId)) {
+      setSelectedConversationId(SHOWCASE_CHAT_ID);
+      replaceConversationInUrl(null);
+      return;
+    }
 
     try {
       await loadConversation(conversationId);
@@ -858,7 +1098,7 @@ export default function ResourceWorkspace() {
     setIsUploading(true);
 
     try {
-      let conversationId = selectedConversationId;
+      let conversationId = isRealConversationId(selectedConversationId) ? selectedConversationId : null;
       if (!conversationId) {
         const detail = await createConversation();
         conversationId = detail.conversation.id;
@@ -901,7 +1141,7 @@ export default function ResourceWorkspace() {
   }
 
   async function syncActiveDocuments(documentIds: number[]) {
-    if (!selectedConversationId) {
+    if (!isRealConversationId(selectedConversationId)) {
       return;
     }
 
@@ -951,7 +1191,11 @@ export default function ResourceWorkspace() {
       return;
     }
 
-    if (!selectedConversationId) {
+    if (isShowcaseSelected) {
+      return;
+    }
+
+    if (!isRealConversationId(selectedConversationId)) {
       setErrorMessage("Create a conversation before sending a message.");
       return;
     }
@@ -1035,10 +1279,10 @@ export default function ResourceWorkspace() {
     await submitCurrentDraft();
   }
 
-  const stageTitle = formatStageTitle(selectedConversation);
+  const stageTitle = isShowcaseSelected ? SHOWCASE_CHAT_TITLE : formatStageTitle(selectedConversation);
 
   return (
-    <div className="overflow-hidden bg-surface text-on-surface">
+    <div className="overflow-hidden bg-surface text-on-surface" data-theme={theme}>
       <input
         ref={uploadInputRef}
         type="file"
@@ -1052,12 +1296,21 @@ export default function ResourceWorkspace() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
             <MaterialIcon icon="architecture" className="text-lg" filled />
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="text-xl font-semibold tracking-[-0.01em] text-on-surface">ReSource</h1>
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
               Digital Atelier
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-outline-variant/40 bg-[var(--workspace-elevated)] text-on-surface-variant shadow-[0_10px_24px_rgba(25,28,30,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:text-primary hover:shadow-[0_16px_28px_rgba(25,28,30,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+            title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            <MaterialIcon icon={isDarkMode ? "light_mode" : "dark_mode"} className="text-[18px]" />
+          </button>
         </div>
         <div className="mb-6 flex flex-col gap-3">
           <button
@@ -1108,25 +1361,31 @@ export default function ResourceWorkspace() {
         </div>
       </aside>
       <main className="relative ml-80 flex h-screen flex-col bg-surface">
-        <header className="z-10 flex w-full flex-col border-b border-outline-variant/30 bg-surface-container-low">
-          <div className="flex h-14 items-center justify-between px-12">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/50">
-                Active Context
-              </span>
+        {isShowcaseSelected ? null : (
+          <header className="z-10 flex w-full flex-col border-b border-outline-variant/30 bg-surface-container-low">
+            <div className="flex h-14 items-center justify-between px-12">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/50">
+                  Active Context
+                </span>
+              </div>
+              <div aria-hidden="true" />
             </div>
-            <div aria-hidden="true" />
-          </div>
-          <ActiveContext
-            documents={activeDocuments}
-            availableDocuments={availableDocuments}
-            onRemove={handleRemoveContextDocument}
-            onAdd={handleAddContextDocument}
-            isPickerOpen={isPickerOpen}
-            onTogglePicker={() => setIsPickerOpen((current) => !current)}
-          />
-        </header>
-        <section className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-12 py-10">
+            <ActiveContext
+              documents={activeDocuments}
+              availableDocuments={availableDocuments}
+              onRemove={handleRemoveContextDocument}
+              onAdd={handleAddContextDocument}
+              isPickerOpen={isPickerOpen}
+              onTogglePicker={() => setIsPickerOpen((current) => !current)}
+            />
+          </header>
+        )}
+        <section
+          className={`mx-auto w-full px-12 ${
+            isShowcaseSelected ? "max-w-[1180px] py-5 overflow-visible" : "max-w-5xl flex-1 overflow-y-auto py-10"
+          }`}
+        >
           {errorMessage ? (
             <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {errorMessage}
@@ -1137,15 +1396,17 @@ export default function ResourceWorkspace() {
               {statusMessage}
             </div>
           ) : null}
-          {stageMode === "preview" && previewDocument ? (
+          {isShowcaseSelected ? (
+            <ShowcaseStage />
+          ) : stageMode === "preview" && previewDocument ? (
             <PreviewStage document={previewDocument} />
           ) : (
             <ChatStage title={stageTitle} messages={messages} loading={isBootstrapping} />
           )}
         </section>
         {stageMode === "chat" ? (
-          <footer className="bg-surface px-12 pb-10 pt-0">
-            <div className="mx-auto max-w-4xl">
+          <footer className={`bg-surface px-12 ${isShowcaseSelected ? "pb-6 pt-2" : "pb-10 pt-0"}`}>
+            <div className={`mx-auto ${isShowcaseSelected ? "max-w-[1040px]" : "max-w-4xl"}`}>
               <form
                 onSubmit={handleSendMessage}
                 className="mb-0 overflow-hidden rounded-3xl border border-outline-variant/45 bg-surface-container-lowest shadow-[0_8px_24px_rgba(25,28,30,0.06)]"
