@@ -12,7 +12,12 @@ from werkzeug.utils import secure_filename
 
 from database import Base, SessionLocal, engine
 from models import ChatMessage, Conversation, ConversationDocument, Document, Embedding
-from utils import chunk_text, extract_text_from_pdf, get_embedding
+from text_utils import (
+    build_grounded_answer_prompt,
+    chunk_text,
+    normalize_grounded_answer,
+)
+from utils import extract_text_from_pdf, get_embedding
 
 load_dotenv()
 
@@ -356,14 +361,9 @@ def create_message(conversation_id: int):
                 return jsonify({"error": "No indexed chunks are available for the active PDF context."}), 400
 
             context_text = "\n\n".join(result.text_chunk for result in results)
-            prompt = (
-                "Context:\n"
-                f"{context_text}\n\n"
-                f"Question: {user_question}\n"
-                "Answer using ONLY the context. If the answer is not in the context, say so plainly."
-            )
+            prompt = build_grounded_answer_prompt(context_text, user_question)
             response = gemini_model.generate_content(prompt)
-            answer_text = response.text or "I could not generate a grounded answer from the retrieved context."
+            answer_text = normalize_grounded_answer(response.text)
         except Exception as error:
             print(f"CHAT ERROR: {error}")
             return jsonify({"error": "AI error. Please try again."}), 500

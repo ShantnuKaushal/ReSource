@@ -8,6 +8,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   createConversation,
@@ -23,6 +24,12 @@ import type { ChatMessage, ConversationSummary, DocumentSummary, PendingMessage 
 
 type StageMode = "chat" | "preview";
 type ThreadMessage = ChatMessage | PendingMessage;
+type MessageBlock =
+  | { type: "heading"; level: 2 | 3; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "bullet-list"; items: string[] }
+  | { type: "number-list"; items: string[] }
+  | { type: "quote"; text: string };
 
 function describeError(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
@@ -120,6 +127,196 @@ function formatStageTitle(conversation: ConversationSummary | null) {
   }
 
   return conversation.title.trim() || "New conversation";
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  return text
+    .split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+    .filter(Boolean)
+    .map((part, index) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={`${part}-${index}`} className="font-semibold text-on-surface">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return (
+          <code
+            key={`${part}-${index}`}
+            className="rounded-md bg-surface px-1.5 py-0.5 font-['IBM_Plex_Mono',monospace] text-[0.92em] text-primary"
+          >
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+
+      return <span key={`${part}-${index}`}>{part}</span>;
+    });
+}
+
+function parseMessageBlocks(text: string): MessageBlock[] {
+  const blocks: MessageBlock[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let paragraphLines: string[] = [];
+  let bulletItems: string[] = [];
+  let numberedItems: string[] = [];
+
+  function flushParagraph() {
+    if (!paragraphLines.length) {
+      return;
+    }
+
+    blocks.push({
+      type: "paragraph",
+      text: paragraphLines.join(" ").trim(),
+    });
+    paragraphLines = [];
+  }
+
+  function flushBulletList() {
+    if (!bulletItems.length) {
+      return;
+    }
+
+    blocks.push({ type: "bullet-list", items: bulletItems });
+    bulletItems = [];
+  }
+
+  function flushNumberedList() {
+    if (!numberedItems.length) {
+      return;
+    }
+
+    blocks.push({ type: "number-list", items: numberedItems });
+    numberedItems = [];
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushParagraph();
+      flushBulletList();
+      flushNumberedList();
+      continue;
+    }
+
+    const headingMatch = /^(#{2,3})\s+(.+)$/.exec(line);
+    if (headingMatch) {
+      flushParagraph();
+      flushBulletList();
+      flushNumberedList();
+      blocks.push({
+        type: "heading",
+        level: headingMatch[1].length === 2 ? 2 : 3,
+        text: headingMatch[2].trim(),
+      });
+      continue;
+    }
+
+    const bulletMatch = /^[-*]\s+(.+)$/.exec(line);
+    if (bulletMatch) {
+      flushParagraph();
+      flushNumberedList();
+      bulletItems.push(bulletMatch[1].trim());
+      continue;
+    }
+
+    const numberedMatch = /^\d+\.\s+(.+)$/.exec(line);
+    if (numberedMatch) {
+      flushParagraph();
+      flushBulletList();
+      numberedItems.push(numberedMatch[1].trim());
+      continue;
+    }
+
+    const quoteMatch = /^>\s+(.+)$/.exec(line);
+    if (quoteMatch) {
+      flushParagraph();
+      flushBulletList();
+      flushNumberedList();
+      blocks.push({ type: "quote", text: quoteMatch[1].trim() });
+      continue;
+    }
+
+    flushBulletList();
+    flushNumberedList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushBulletList();
+  flushNumberedList();
+
+  return blocks;
+}
+
+function RichMessageContent({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMessageBlocks(text), [text]);
+
+  return (
+    <div className="space-y-3.5 text-[15px] leading-7 text-on-surface-variant">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const HeadingTag = block.level === 2 ? "h3" : "h4";
+          const sizeClass = block.level === 2 ? "text-lg" : "text-base";
+
+          return (
+            <HeadingTag
+              key={`${block.type}-${index}`}
+              className={`${sizeClass} font-semibold tracking-[-0.02em] text-on-surface`}
+            >
+              {renderInlineMarkdown(block.text)}
+            </HeadingTag>
+          );
+        }
+
+        if (block.type === "bullet-list") {
+          return (
+            <ul key={`${block.type}-${index}`} className="space-y-2 pl-5 text-on-surface-variant">
+              {block.items.map((item, itemIndex) => (
+                <li key={`${item}-${itemIndex}`} className="list-disc pl-1">
+                  {renderInlineMarkdown(item)}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (block.type === "number-list") {
+          return (
+            <ol key={`${block.type}-${index}`} className="space-y-2 pl-5 text-on-surface-variant">
+              {block.items.map((item, itemIndex) => (
+                <li key={`${item}-${itemIndex}`} className="list-decimal pl-1">
+                  {renderInlineMarkdown(item)}
+                </li>
+              ))}
+            </ol>
+          );
+        }
+
+        if (block.type === "quote") {
+          return (
+            <blockquote
+              key={`${block.type}-${index}`}
+              className="border-l-2 border-primary/18 pl-4 text-sm italic text-on-surface-variant"
+            >
+              {renderInlineMarkdown(block.text)}
+            </blockquote>
+          );
+        }
+
+        return (
+          <p key={`${block.type}-${index}`} className="text-on-surface-variant">
+            {renderInlineMarkdown(block.text)}
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 function MaterialIcon({
@@ -294,9 +491,9 @@ function DocumentLibrary({
             </div>
             <div className="min-w-0">
               <p className="truncate text-[11px] font-semibold">{document.filename}</p>
-              <p className="text-[9px] font-medium text-on-surface-variant">
-                {formatFileSize(document.file_size)} • {formatRelativeTime(document.upload_date)}
-              </p>
+                <p className="text-[9px] font-medium text-on-surface-variant">
+                  {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
+                </p>
             </div>
           </button>
         );
@@ -366,7 +563,7 @@ function ActiveContext({
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-semibold text-on-surface">{document.filename}</p>
                       <p className="text-[9px] font-medium text-on-surface-variant">
-                        {formatFileSize(document.file_size)} • {formatRelativeTime(document.upload_date)}
+                        {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
                       </p>
                     </div>
                   </button>
@@ -388,8 +585,11 @@ function UserMessage({ message }: { message: ThreadMessage }) {
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_4px_16px_rgba(181,164,109,0.12)]">
         <MaterialIcon icon="person" className="text-[1.25rem] text-primary" />
       </div>
-      <div className="flex-1 pt-2.5">
-        <p className="font-medium leading-relaxed text-on-surface">{message.text}</p>
+      <div className="flex-1 rounded-[1.75rem] border border-secondary/30 bg-white/75 px-6 py-5 shadow-[0_10px_30px_rgba(34,36,38,0.04)]">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-on-surface-variant/55">
+          You asked
+        </p>
+        <p className="text-[15px] font-medium leading-7 text-on-surface">{message.text}</p>
       </div>
     </div>
   );
@@ -397,25 +597,53 @@ function UserMessage({ message }: { message: ThreadMessage }) {
 
 function AssistantMessage({ message }: { message: ThreadMessage }) {
   const citations = "citations" in message ? message.citations : [];
+  const isPending = "pending" in message && Boolean(message.pending);
+  const isNotFound = message.text.trim().toLowerCase().startsWith("not found in the uploaded context");
+  const cardClassName = isNotFound
+    ? "border-amber-200/80 bg-[linear-gradient(180deg,rgba(255,251,235,0.94),rgba(255,255,255,0.98))] shadow-[0_14px_34px_rgba(217,119,6,0.08)]"
+    : "border-outline-variant/45 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,247,242,0.82))] shadow-[0_18px_40px_rgba(34,36,38,0.06)]";
+  const badgeClassName = isNotFound ? "bg-amber-100 text-amber-800" : "bg-primary/8 text-primary";
 
   return (
     <div className="flex items-start gap-5">
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary shadow-[0_10px_24px_rgba(67,56,202,0.22)] ring-4 ring-primary-container/55">
         <MaterialIcon icon="auto_awesome" className="text-[1.1rem] text-white" filled />
       </div>
-      <div className="flex-1 rounded-3xl border border-outline-variant/40 bg-white p-6 shadow-sm">
-        <p className="whitespace-pre-wrap leading-relaxed text-on-surface-variant">{message.text}</p>
+      <div className={`flex-1 rounded-[1.9rem] border p-6 ${cardClassName}`}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${badgeClassName}`}>
+              {isNotFound ? "Context Gap" : "Grounded Answer"}
+            </span>
+            {isPending ? (
+              <span className="text-[11px] font-medium text-on-surface-variant/70">Drafting response...</span>
+            ) : null}
+          </div>
+          {citations.length ? (
+            <span className="text-[11px] font-medium text-on-surface-variant/55">
+              {citations.length} source{citations.length === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </div>
+
+        <RichMessageContent text={message.text} />
+
         {citations.length ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {citations.map((citation) => (
-              <div
-                key={citation}
-                className="flex w-fit items-center gap-2 rounded-lg border border-outline-variant/10 bg-surface-container-low p-2"
-              >
-                <MaterialIcon icon="description" className="text-sm text-primary" />
-                <span className="text-[10px] font-bold text-on-surface-variant">{citation}</span>
-              </div>
-            ))}
+          <div className="mt-5 border-t border-outline-variant/35 pt-4">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-on-surface-variant/55">
+              Sources
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {citations.map((citation) => (
+                <div
+                  key={citation}
+                  className="flex w-fit items-center gap-2 rounded-xl border border-outline-variant/20 bg-white/80 px-3 py-2"
+                >
+                  <MaterialIcon icon="description" className="text-sm text-primary" />
+                  <span className="text-[11px] font-semibold text-on-surface-variant">{citation}</span>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
@@ -452,7 +680,7 @@ function ChatStage({
   }
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-8">
       {messages.map((message) =>
         message.sender === "user" ? (
           <UserMessage key={String(message.id)} message={message} />
@@ -470,7 +698,7 @@ function PreviewStage({ document }: { document: DocumentSummary }) {
       <div className="rounded-3xl border border-outline-variant/40 bg-white p-8 shadow-sm">
         <h2 className="text-xl font-semibold tracking-[-0.01em] text-on-surface">{document.filename}</h2>
         <p className="mt-2 text-sm text-on-surface-variant">
-          PDF preview • {formatFileSize(document.file_size)} • {formatRelativeTime(document.upload_date)}
+          PDF preview · {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
         </p>
       </div>
       <div className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-white shadow-sm">

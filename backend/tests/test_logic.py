@@ -1,4 +1,4 @@
-from utils import chunk_text
+from text_utils import chunk_text, normalize_grounded_answer
 
 def test_chunk_text_size():
     # Create a string of 1200 'a's
@@ -18,3 +18,15 @@ def test_chunk_text_content():
     
     reconstructed = "".join(chunks)
     assert reconstructed == original_text
+
+
+def test_normalize_grounded_answer_removes_context_preamble():
+    answer = "Based on the provided context: Python is listed as a required skill."
+
+    assert normalize_grounded_answer(answer) == "Python is listed as a required skill."
+
+
+def test_normalize_grounded_answer_standardizes_missing_answer():
+    answer = "The answer is not in the context."
+
+    assert normalize_grounded_answer(answer).startswith("Not found in the uploaded context.")

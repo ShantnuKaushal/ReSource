@@ -95,6 +95,29 @@ function makeConversationDetail(conversationId: number) {
   };
 }
 
+function makeMarkdownConversationDetail() {
+  return {
+    conversation: conversations[0],
+    messages: [
+      {
+        id: 30,
+        sender: "user" as const,
+        text: "What stack should I use?",
+        citations: [],
+        created_at: "2026-04-12T04:00:00Z",
+      },
+      {
+        id: 31,
+        sender: "assistant" as const,
+        text: "## Recommended stack\n\nUse **Python** for the backend.\n\n- FastAPI for the API layer\n- PostgreSQL for storage\n- Docker for deployment",
+        citations: ["project_alpha_tech_spec.pdf"],
+        created_at: "2026-04-12T04:00:05Z",
+      },
+    ],
+    active_documents: [documents[0]],
+  };
+}
+
 class UploadSuccessXHR {
   static nextPayload = {
     message: "File processed successfully",
@@ -385,5 +408,34 @@ describe("ResourceWorkspace", () => {
     await waitFor(() => {
       expect(screen.getAllByText("AI error. Please try again.").length).toBeGreaterThan(0);
     });
+  });
+
+  it("renders structured assistant markdown as headings and bullets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith("/documents")) {
+          return jsonResponse(documents);
+        }
+
+        if (url.endsWith("/conversations")) {
+          return jsonResponse(conversations);
+        }
+
+        if (url.endsWith("/conversations/7")) {
+          return jsonResponse(makeMarkdownConversationDetail());
+        }
+
+        throw new Error(`Unhandled fetch: ${url}`);
+      }),
+    );
+
+    render(<ResourceWorkspace />);
+
+    expect(await screen.findByRole("heading", { name: "Recommended stack" })).toBeInTheDocument();
+    expect(screen.getByText("FastAPI for the API layer")).toBeInTheDocument();
+    expect(screen.getByText("PostgreSQL for storage")).toBeInTheDocument();
   });
 });
