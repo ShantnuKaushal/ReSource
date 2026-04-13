@@ -4,17 +4,19 @@ Thumbs.db
 
 # Ignore Python
 backend/venv/
+backend/.pytest_cache/
 backend/__pycache__/
 *.pyc
 
-# Ignore Node (Mobile)
-mobile/node_modules/
-mobile/.expo/
-mobile/dist/
+# Ignore Node (Frontend)
+frontend/node_modules/
+frontend/.next/
+frontend/coverage/
+mobile/
 
 # Ignore Environment Variables (Security)
 .env
-mobile/.env
+frontend/.env.local
 
 # Ignore Uploads
 backend/uploads/*
