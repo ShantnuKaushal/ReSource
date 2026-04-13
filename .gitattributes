@@ -1,1 +1,5 @@
-frontend/** linguist-vendored
+frontend/package-lock.json linguist-generated
+frontend/tsconfig.tsbuildinfo linguist-generated
+frontend/src/components/resource-workspace.tsx linguist-vendored
+frontend/src/components/resource-workspace.test.tsx linguist-vendored
+backend/Dockerfile linguist-vendored
