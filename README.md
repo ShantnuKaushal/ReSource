@@ -1,53 +1,82 @@
 # ReSource
 
-ReSource is a browser-first retrieval workspace for grounding answers in private PDFs. You upload a document through the frontend app, the Flask backend extracts and chunks the text, generates local embeddings with `all-MiniLM-L6-v2`, stores them in PostgreSQL with `pgvector`, and only then asks Gemini to answer against the retrieved context.
+ReSource is a browser-first PDF retrieval workspace. It lets you upload PDFs, attach them to a conversation, and ask grounded questions against indexed document content instead of chatting against a model with no local context.
 
-This version removes the old Expo/React Native client and replaces it with a mobile-web Next.js interface designed for a calmer, more precise research workflow.
+The core retrieval layer is powered by local embeddings generated with `all-MiniLM-L6-v2`, which drives the document search and grounding workflow.
+
+The project is split into a Flask backend for ingestion and retrieval, plus a Next.js frontend for the workspace UI.
+
+## Description
+
+ReSource is built for document-grounded research workflows:
+
+- upload PDFs into a document library
+- attach one or more PDFs to the active conversation
+- ask questions against the active document set
+- generate local embeddings with `all-MiniLM-L6-v2`
+- retrieve the most relevant chunks from PostgreSQL via `pgvector`
+- generate a final answer from retrieved document context
 
 ## Stack
 
 ### Backend
-- Python 3.11
-- Flask + Flask-CORS
+
+- Python
+- Flask
+- Flask-CORS
 - SQLAlchemy
-- PostgreSQL 16 + `pgvector`
+- PostgreSQL 16
+- `pgvector`
 - `sentence-transformers` with `all-MiniLM-L6-v2`
-- Google Gemini via `google-generativeai`
 - `pypdf`
 
 ### Frontend
+
 - Next.js 16
 - React 19
 - TypeScript
 - Tailwind CSS 4
-- Vitest + Testing Library
+- Vitest
+- Testing Library
 
 ### Tooling
-- Docker + Docker Compose for the backend stack
-- GitHub Actions for backend tests
+
+- Docker / Docker Compose for the local backend stack
+- GitHub Actions for backend CI
 
 ## Product Flow
 
-1. Upload a PDF from the frontend workspace.
-2. The backend extracts text from the file and splits it into fixed-size chunks.
-3. Each chunk is embedded locally using `all-MiniLM-L6-v2`.
-4. The embeddings are stored in PostgreSQL using the `vector` column type from `pgvector`.
-5. When you ask a question, the backend embeds the question, retrieves the nearest chunks by cosine distance, and asks Gemini to answer using only those retrieved chunks.
-6. The UI shows the answer with filename-level citations.
+1. Start the backend and frontend locally.
+2. Upload one or more PDFs from the workspace UI.
+3. The backend extracts the PDF text and splits it into chunks.
+4. Each chunk is embedded locally with `all-MiniLM-L6-v2`.
+5. The embeddings are stored in PostgreSQL using `pgvector`.
+6. Create or open a conversation in the workspace.
+7. Add the relevant PDFs to that conversation's active context.
+8. Ask a question from the frontend.
+9. The backend embeds the question and retrieves the nearest chunks for grounded answering.
+10. The UI renders the answer along with filename-level citations.
 
 ## Project Structure
 
 ```text
 ReSource/
-├── backend/               # Flask API, database models, PDF processing, retrieval logic
-├── frontend/              # Next.js browser client
-├── .github/workflows/     # CI for backend tests
-├── docker-compose.yml     # PostgreSQL + Flask backend
+|-- backend/              Flask API, models, retrieval logic, PDF processing
+|-- frontend/             Next.js app and workspace UI
+|-- .github/workflows/    CI configuration
+|-- docker-compose.yml    Local PostgreSQL + backend stack
+|-- .env.example          Root environment template
 ```
 
-## Environment Setup
+## Setup
 
-### Root `.env`
+### Prerequisites
+
+- Node.js
+- npm
+- Docker Desktop
+
+### Environment Variables
 
 Create a root `.env` file:
 
@@ -55,34 +84,37 @@ Create a root `.env` file:
 GOOGLE_API_KEY=your_gemini_api_key_here
 ```
 
-### Frontend `.env.local`
-
 Create `frontend/.env.local`:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
 
-If you are testing from another device on the same network, use your machine's LAN IP instead of `localhost`.
+If you want to access the frontend from another device on the same network, replace `localhost` with your machine's LAN IP in `frontend/.env.local`.
 
 ## Running The Project
 
-### Option 1: Recommended manual startup
-
-Start the backend stack:
+### 1. Start the backend stack
 
 ```powershell
 docker compose up -d --build
 ```
 
-Then start the frontend app:
+This starts:
+
+- PostgreSQL on `localhost:5433`
+- Flask API on `http://localhost:5000`
+
+### 2. Start the frontend
 
 ```powershell
 cd frontend
 cmd /c npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+The frontend will run on:
+
+- `http://localhost:3000`
 
 ## Useful Commands
 
@@ -96,6 +128,19 @@ docker compose logs -f api
 
 ```powershell
 docker compose logs -f db
+```
+
+### Stop the backend stack
+
+```powershell
+docker compose down
+```
+
+### Frontend dev server
+
+```powershell
+cd frontend
+cmd /c npm run dev
 ```
 
 ### Frontend tests
@@ -112,32 +157,16 @@ cd frontend
 cmd /c npm run lint
 ```
 
-### Production build check
+### Frontend production build check
 
 ```powershell
 cd frontend
 cmd /c npm run build
 ```
 
-## API Surface
+### Backend test run
 
-### `GET /documents`
-Returns the currently indexed documents for the workspace UI.
-
-### `POST /upload`
-Accepts a PDF as multipart form data and stores its chunks and embeddings.
-
-### `POST /chat`
-Accepts `{ "question": "..." }` and returns a grounded answer plus citations.
-
-## Testing
-
-### Backend
-GitHub Actions runs backend pytest coverage for chunking logic.
-
-### Frontend
-Vitest covers the main workspace states:
-- empty library state
-- missing file validation
-- failed upload state
-- failed chat state
+```powershell
+cd backend
+pytest
+```
