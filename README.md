@@ -170,3 +170,9 @@ cmd /c npm run build
 cd backend
 pytest
 ```
+## Interface Preview
+
+Below is a quick preview of the ReSource workspace interface. This screenshot shows the main dashboard experience, including the document library, active context flow, and conversation workspace used for grounded PDF-based answers.
+
+![Dashboard](https://github.com/user-attachments/assets/5849f17e-470b-4730-ac4d-79e368464db6)
+
