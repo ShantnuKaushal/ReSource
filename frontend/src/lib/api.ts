@@ -30,6 +30,17 @@ async function requestJson<T>(input: string, init?: RequestInit) {
   return (await response.json()) as T;
 }
 
+async function requestVoid(input: string, init?: RequestInit) {
+  const response = await fetch(`${baseUrl}${input}`, {
+    cache: "no-store",
+    ...init,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+}
+
 export function getDocumentFileUrl(documentId: number) {
   return `${baseUrl}/documents/${documentId}/file`;
 }
@@ -55,6 +66,12 @@ export function fetchConversation(conversationId: number) {
   return requestJson<ConversationDetail>(`/conversations/${conversationId}`);
 }
 
+export function deleteConversation(conversationId: number) {
+  return requestVoid(`/conversations/${conversationId}`, {
+    method: "DELETE",
+  });
+}
+
 export function updateConversationDocuments(conversationId: number, documentIds: number[]) {
   return requestJson<DocumentSummary[]>(`/conversations/${conversationId}/active-documents`, {
     method: "PUT",
@@ -72,6 +89,12 @@ export function sendMessage(conversationId: number, question: string) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ question }),
+  });
+}
+
+export function deleteDocument(documentId: number) {
+  return requestVoid(`/documents/${documentId}`, {
+    method: "DELETE",
   });
 }
 

@@ -116,6 +116,13 @@ def conversation_detail_payload(conversation: Conversation):
     }
 
 
+def delete_file_if_present(file_path: str | None):
+    if not file_path or not os.path.exists(file_path):
+        return
+
+    os.remove(file_path)
+
+
 def seed_legacy_document_fields():
     with SessionLocal() as db:
         documents = (
@@ -166,6 +173,30 @@ def get_document_file(document_id: int):
             return jsonify({"error": "PDF file is missing from storage."}), 404
 
         return send_file(document.file_path, mimetype="application/pdf", download_name=document.filename)
+
+
+@app.route("/documents/<int:document_id>", methods=["DELETE"])
+def delete_document(document_id: int):
+    with SessionLocal() as db:
+        document = db.query(Document).filter(Document.id == document_id).first()
+
+        if not document:
+            return jsonify({"error": "Document not found."}), 404
+
+        impacted_conversations = [link.conversation for link in document.conversation_links]
+        timestamp = utc_timestamp()
+        file_path = document.file_path
+        filename = document.filename
+
+        for conversation in impacted_conversations:
+            conversation.updated_at = timestamp
+
+        db.delete(document)
+        db.commit()
+
+    delete_file_if_present(file_path)
+
+    return jsonify({"message": f'{filename} deleted successfully.'}), 200
 
 
 @app.route("/upload", methods=["POST"])
@@ -253,6 +284,21 @@ def get_conversation(conversation_id: int):
             return jsonify({"error": "Conversation not found."}), 404
 
         return jsonify(conversation_detail_payload(conversation)), 200
+
+
+@app.route("/conversations/<int:conversation_id>", methods=["DELETE"])
+def delete_conversation(conversation_id: int):
+    with SessionLocal() as db:
+        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+
+        if not conversation:
+            return jsonify({"error": "Conversation not found."}), 404
+
+        title = conversation.title
+        db.delete(conversation)
+        db.commit()
+
+        return jsonify({"message": f'{title} deleted successfully.'}), 200
 
 
 @app.route("/conversations/<int:conversation_id>/messages", methods=["GET"])

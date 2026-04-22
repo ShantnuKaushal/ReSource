@@ -152,6 +152,7 @@ describe("ResourceWorkspace", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.removeItem("resource-workspace-theme");
+    window.localStorage.removeItem("resource-workspace-sidebar-collapsed");
     delete document.documentElement.dataset.theme;
     window.history.replaceState({}, "", "/");
   });
@@ -444,7 +445,7 @@ describe("ResourceWorkspace", () => {
     expect(screen.getByText("PostgreSQL for storage")).toBeInTheDocument();
   });
 
-  it("toggles dark mode and keeps the featured analysis accessible", async () => {
+  it("toggles dark mode and keeps the analysis entry accessible", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -475,12 +476,25 @@ describe("ResourceWorkspace", () => {
       expect(document.documentElement.dataset.theme).toBe("dark");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Featured Analysis" }));
+    fireEvent.click(screen.getByRole("button", { name: "Analysis" }));
 
-    expect(await screen.findByText(showcaseQuestion)).toBeInTheDocument();
+    expect(await screen.findByText(showcaseQuestion, undefined, { timeout: 12000 })).toBeInTheDocument();
+  }, 15000);
+
+  it("renders the isolated thumbnail preview without the full app sidebar", () => {
+    render(<ResourceWorkspace mode="thumbnail-preview" />);
+
+    expect(screen.getByText(showcaseQuestion)).toBeInTheDocument();
+    expect(screen.getByText("Executive Compliance Summary")).toBeInTheDocument();
+    expect(screen.queryByText("Analysis")).not.toBeInTheDocument();
+    expect(screen.queryByText("2 Active PDFs")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live Review")).not.toBeInTheDocument();
+    expect(screen.queryByText("3 Findings")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload PDF" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Document Library")).not.toBeInTheDocument();
   });
 
-  it("renders the featured analysis screen and returns to a real conversation", async () => {
+  it("renders the analysis screen and returns to a real conversation", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -510,17 +524,165 @@ describe("ResourceWorkspace", () => {
 
     expect(await screen.findByText("Use the OpenAI SDK, environment variables, and a prompt handler.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Featured Analysis" }));
+    fireEvent.click(screen.getByRole("button", { name: "Analysis" }));
 
-    expect(await screen.findByText(showcaseQuestion)).toBeInTheDocument();
-    expect(screen.getByText("Executive Compliance Summary")).toBeInTheDocument();
-    expect(screen.getByText(/I\. DATA SOVEREIGNTY VIOLATION/)).toBeInTheDocument();
-    expect(screen.getByText(/II\. AUTHENTICATION REDUNDANCY/)).toBeInTheDocument();
-    expect(screen.getByText(/III\. POLICY ALIGNMENT/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Ask about the active PDFs...")).toBeInTheDocument();
+    expect(await screen.findByText(showcaseQuestion, undefined, { timeout: 12000 })).toBeInTheDocument();
+    expect(await screen.findByText("Executive Compliance Summary", undefined, { timeout: 12000 })).toBeInTheDocument();
+    expect(await screen.findByText(/I\. DATA SOVEREIGNTY VIOLATION/, undefined, { timeout: 14000 })).toBeInTheDocument();
+    expect(await screen.findByText(/II\. AUTHENTICATION REDUNDANCY/, undefined, { timeout: 14000 })).toBeInTheDocument();
+    expect(await screen.findByText(/III\. POLICY ALIGNMENT/, undefined, { timeout: 14000 })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Send analysis replay" })).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Auth Review" }));
 
     expect(await screen.findByText("OAuth 2.0 and OpenID Connect are used for authentication.")).toBeInTheDocument();
+  }, 40000);
+
+  it("collapses and re-expands the sidebar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith("/documents")) {
+          return jsonResponse(documents);
+        }
+
+        if (url.endsWith("/conversations")) {
+          return jsonResponse(conversations);
+        }
+
+        if (url.endsWith("/conversations/7")) {
+          return jsonResponse(makeConversationDetail(7));
+        }
+
+        throw new Error(`Unhandled fetch: ${url}`);
+      }),
+    );
+
+    render(<ResourceWorkspace />);
+
+    expect(await screen.findByText("Use the OpenAI SDK, environment variables, and a prompt handler.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
+  });
+
+  it("deletes a conversation from the sidebar and backend while keeping Analysis protected", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/documents")) {
+        return jsonResponse(documents);
+      }
+
+      if (url.endsWith("/conversations") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(conversations);
+      }
+
+      if (url.endsWith("/conversations/7") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(makeConversationDetail(7));
+      }
+
+      if (url.endsWith("/conversations/7") && init?.method === "DELETE") {
+        return jsonResponse({ message: "Deleted" });
+      }
+
+      if (url.endsWith("/conversations/8") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(makeConversationDetail(8));
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ResourceWorkspace />);
+
+    expect(await screen.findByText("Use the OpenAI SDK, environment variables, and a prompt handler.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete chat Analysis" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete chat Create Chatbot GPT..." }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:5000/conversations/7",
+        expect.objectContaining({ method: "DELETE", cache: "no-store" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Create Chatbot GPT..." })).not.toBeInTheDocument();
+    });
+
+    expect(await screen.findByText("OAuth 2.0 and OpenID Connect are used for authentication.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Analysis" })).toBeInTheDocument();
+  });
+
+  it("deletes a document from the library and removes it from active context", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    let detail = makeConversationDetail(7);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/documents/1") && init?.method === "DELETE") {
+        detail = {
+          ...detail,
+          active_documents: [],
+        };
+        return jsonResponse({ message: "Deleted" });
+      }
+
+      if (url.endsWith("/documents")) {
+        return jsonResponse(documents);
+      }
+
+      if (url.endsWith("/conversations") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(
+          conversations.map((conversation) =>
+            conversation.id === 7 ? { ...conversation, active_document_count: 0 } : conversation,
+          ),
+        );
+      }
+
+      if (url.endsWith("/conversations/7")) {
+        return jsonResponse(detail);
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ResourceWorkspace />);
+
+    expect(await screen.findByText("Use the OpenAI SDK, environment variables, and a prompt handler.")).toBeInTheDocument();
+    expect(screen.getByText("[PDF] project_alpha_tech_spec.pdf")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete document project_alpha_tech_spec.pdf" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:5000/documents/1",
+        expect.objectContaining({ method: "DELETE", cache: "no-store" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "project_alpha_tech_spec.pdf" })).not.toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("[PDF] project_alpha_tech_spec.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText("project_alpha_tech_spec.pdf deleted.")).toBeInTheDocument();
   });
 });

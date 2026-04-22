@@ -12,6 +12,8 @@ import {
 } from "react";
 import {
   createConversation,
+  deleteConversation,
+  deleteDocument,
   fetchConversation,
   fetchConversations,
   fetchDocuments,
@@ -20,12 +22,20 @@ import {
   updateConversationDocuments,
   uploadDocument,
 } from "@/lib/api";
-import type { ChatMessage, ConversationSummary, DocumentSummary, PendingMessage } from "@/lib/types";
+import type {
+  ChatMessage,
+  ConversationDetail,
+  ConversationSummary,
+  DocumentSummary,
+  PendingMessage,
+} from "@/lib/types";
 
 type StageMode = "chat" | "preview";
 type ThreadMessage = ChatMessage | PendingMessage;
 type ConversationSelection = number | typeof SHOWCASE_CHAT_ID | null;
 type WorkspaceTheme = "light" | "dark";
+type ResourceWorkspaceMode = "default" | "thumbnail-preview";
+type ShowcaseStageVariant = "workspace" | "thumbnail";
 type MessageBlock =
   | { type: "heading"; level: 2 | 3; text: string }
   | { type: "paragraph"; text: string }
@@ -43,10 +53,34 @@ type ComplianceSection = {
   tone: ComplianceTone;
   items: string[];
 };
+type AnalysisReplayState = {
+  composerText: string;
+  isComposerTyping: boolean;
+  showComposerCaret: boolean;
+  isSubmitting: boolean;
+  hasSubmitted: boolean;
+  userText: string;
+  showUserMessage: boolean;
+  showThinking: boolean;
+  assistantVisible: boolean;
+  titleText: string;
+  subtitleText: string;
+  visibleSectionCount: number;
+  isGenerating: boolean;
+};
 
-const SHOWCASE_CHAT_ID = "featured-analysis";
-const SHOWCASE_CHAT_TITLE = "Featured Analysis";
+const SHOWCASE_CHAT_ID = "analysis";
+const SHOWCASE_CHAT_TITLE = "Analysis";
+const SIDEBAR_STORAGE_KEY = "resource-workspace-sidebar-collapsed";
 const THEME_STORAGE_KEY = "resource-workspace-theme";
+const SHOWCASE_COMPOSER_START_DELAY_MS = 260;
+const SHOWCASE_PRE_SUBMIT_DELAY_MS = 2000;
+const SHOWCASE_SUBMIT_CLICK_DELAY_MS = 280;
+const SHOWCASE_SUBMIT_CLEAR_DELAY_MS = 180;
+const SHOWCASE_ASSISTANT_START_DELAY_MS = 2000;
+const SHOWCASE_SECTION_INITIAL_DELAY_MS = 320;
+const SHOWCASE_SECTION_STEP_MS = 2300;
+const SHOWCASE_REPLAY_START_DELAY_MS = 2000;
 const SHOWCASE_CHAT_QUESTION =
   "What are the critical risks and compliance implications highlighted within these documents?";
 const SHOWCASE_SCOPE_DOCUMENTS: ShowcaseScopeDocument[] = [
@@ -204,6 +238,22 @@ function getPreferredTheme(): WorkspaceTheme {
   return "light";
 }
 
+function getPreferredSidebarState() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+}
+
+function confirmDestructiveAction(message: string) {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return window.confirm(message);
+}
+
 function renderInlineMarkdown(text: string): ReactNode[] {
   return text
     .split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
@@ -230,6 +280,306 @@ function renderInlineMarkdown(text: string): ReactNode[] {
 
       return <span key={`${part}-${index}`}>{part}</span>;
     });
+}
+
+function createCompletedAnalysisReplayState(): AnalysisReplayState {
+  return {
+    composerText: "",
+    isComposerTyping: false,
+    showComposerCaret: false,
+    isSubmitting: false,
+    hasSubmitted: true,
+    userText: SHOWCASE_CHAT_QUESTION,
+    showUserMessage: true,
+    showThinking: false,
+    assistantVisible: true,
+    titleText: "Executive Compliance Summary",
+    subtitleText: "Review Portal Output",
+    visibleSectionCount: SHOWCASE_COMPLIANCE_SECTIONS.length,
+    isGenerating: false,
+  };
+}
+
+function createInitialAnalysisReplayState(): AnalysisReplayState {
+  return {
+    composerText: "",
+    isComposerTyping: false,
+    showComposerCaret: false,
+    isSubmitting: false,
+    hasSubmitted: false,
+    userText: "",
+    showUserMessage: false,
+    showThinking: false,
+    assistantVisible: false,
+    titleText: "",
+    subtitleText: "",
+    visibleSectionCount: 0,
+    isGenerating: false,
+  };
+}
+
+function getShowcaseTypingDelay(text: string, index: number) {
+  const character = text[index] ?? "";
+
+  if (!character) {
+    return 64;
+  }
+
+  if (character === " ") {
+    return 34 + ((index * 11) % 16);
+  }
+
+  if (/[,.!?]/.test(character)) {
+    return 170 + ((index * 17) % 90);
+  }
+
+  if (/[:;]/.test(character)) {
+    return 130 + ((index * 13) % 70);
+  }
+
+  if (/[-/]/.test(character)) {
+    return 110 + ((index * 19) % 50);
+  }
+
+  return 42 + ((index * 29 + character.charCodeAt(0)) % 52);
+}
+
+function useWordReveal(text: string, animate: boolean, startDelay = 0, wordDelay = 82) {
+  const [value, setValue] = useState(() => (animate ? "" : text));
+
+  useEffect(() => {
+    if (!animate) {
+      setValue(text);
+      return;
+    }
+
+    const words = text.split(/(\s+)/).filter(Boolean);
+    if (!words.length) {
+      setValue("");
+      return;
+    }
+
+    setValue("");
+    let index = 0;
+    let intervalId: number | null = null;
+
+    const timeoutId = window.setTimeout(() => {
+      intervalId = window.setInterval(() => {
+        index += 1;
+        setValue(words.slice(0, index).join(""));
+
+        if (index >= words.length && intervalId !== null) {
+          window.clearInterval(intervalId);
+          intervalId = null;
+        }
+      }, wordDelay);
+    }, startDelay);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [animate, startDelay, text, wordDelay]);
+
+  return value;
+}
+
+function useAnalysisReplay(play: boolean, playbackKey: number) {
+  const [state, setState] = useState<AnalysisReplayState>(createInitialAnalysisReplayState);
+
+  useEffect(() => {
+    if (!play) {
+      setState(createInitialAnalysisReplayState());
+      return;
+    }
+
+    let cancelled = false;
+    const timers: number[] = [];
+
+    const updateState = (partial: Partial<AnalysisReplayState>) => {
+      if (cancelled) {
+        return;
+      }
+
+      setState((current) => ({ ...current, ...partial }));
+    };
+
+    const schedule = (callback: () => void, delay: number) => {
+      const timerId = window.setTimeout(() => {
+        if (!cancelled) {
+          callback();
+        }
+      }, delay);
+      timers.push(timerId);
+      return timerId;
+    };
+
+    const typeText = (
+      text: string,
+      onUpdate: (value: string) => void,
+      onComplete?: () => void,
+      startDelay = 0,
+    ) => {
+      let index = 0;
+
+      const step = () => {
+        if (cancelled) {
+          return;
+        }
+
+        index += 1;
+        onUpdate(text.slice(0, index));
+
+        if (index >= text.length) {
+          onComplete?.();
+          return;
+        }
+
+        schedule(step, getShowcaseTypingDelay(text, index - 1));
+      };
+
+      schedule(step, startDelay);
+    };
+
+    const revealSections = () => {
+      let visibleCount = 0;
+
+      const step = () => {
+        if (cancelled) {
+          return;
+        }
+
+        visibleCount += 1;
+        updateState({ visibleSectionCount: Math.min(visibleCount, SHOWCASE_COMPLIANCE_SECTIONS.length) });
+
+        if (visibleCount >= SHOWCASE_COMPLIANCE_SECTIONS.length) {
+          updateState({ isGenerating: false });
+          return;
+        }
+
+        schedule(step, SHOWCASE_SECTION_STEP_MS);
+      };
+
+      schedule(step, SHOWCASE_SECTION_INITIAL_DELAY_MS);
+    };
+
+    setState(createInitialAnalysisReplayState());
+
+    schedule(() => {
+      updateState({
+        isComposerTyping: true,
+        showComposerCaret: true,
+      });
+
+      typeText(
+        SHOWCASE_CHAT_QUESTION,
+        (value) => {
+          updateState({
+            composerText: value,
+            isComposerTyping: value !== SHOWCASE_CHAT_QUESTION,
+            showComposerCaret: true,
+          });
+        },
+        () => {
+          updateState({
+            composerText: SHOWCASE_CHAT_QUESTION,
+            isComposerTyping: false,
+            showComposerCaret: true,
+          });
+
+          schedule(() => {
+            updateState({
+              isSubmitting: true,
+              showComposerCaret: false,
+            });
+          }, SHOWCASE_PRE_SUBMIT_DELAY_MS + SHOWCASE_SUBMIT_CLICK_DELAY_MS);
+
+          schedule(() => {
+            updateState({
+              composerText: "",
+              isSubmitting: false,
+              showComposerCaret: false,
+              hasSubmitted: true,
+              showUserMessage: true,
+              userText: SHOWCASE_CHAT_QUESTION,
+              showThinking: true,
+            });
+
+            schedule(() => {
+              updateState({
+                showThinking: false,
+                assistantVisible: true,
+                isGenerating: true,
+                titleText: "Executive Compliance Summary",
+                subtitleText: "Review Portal Output",
+              });
+              revealSections();
+            }, SHOWCASE_ASSISTANT_START_DELAY_MS);
+          }, SHOWCASE_PRE_SUBMIT_DELAY_MS + SHOWCASE_SUBMIT_CLICK_DELAY_MS + SHOWCASE_SUBMIT_CLEAR_DELAY_MS);
+        },
+        SHOWCASE_COMPOSER_START_DELAY_MS,
+      );
+    }, SHOWCASE_REPLAY_START_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      timers.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [play, playbackKey]);
+
+  return play ? state : createCompletedAnalysisReplayState();
+}
+
+function useMountTransition(animate: boolean) {
+  const [entered, setEntered] = useState(() => !animate);
+
+  useEffect(() => {
+    if (!animate) {
+      setEntered(true);
+      return;
+    }
+
+    setEntered(false);
+    const timeoutId = window.setTimeout(() => {
+      setEntered(true);
+    }, 20);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [animate]);
+
+  return entered;
+}
+
+function useShowcaseAutoScroll(replay?: AnalysisReplayState) {
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!replay) {
+      return;
+    }
+
+    if (!replay.showUserMessage && !replay.showThinking && !replay.assistantVisible) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      bottomRef.current?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "end",
+      });
+    }, 140);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [replay?.showUserMessage, replay?.showThinking, replay?.assistantVisible, replay?.visibleSectionCount]);
+
+  return bottomRef;
 }
 
 function parseMessageBlocks(text: string): MessageBlock[] {
@@ -499,6 +849,27 @@ function MaterialIcon({
           <path d="M20 14.2A7.8 7.8 0 1 1 9.8 4 6.4 6.4 0 0 0 20 14.2Z" />
         </svg>
       );
+    case "chevron_left":
+      return (
+        <svg {...sharedProps}>
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+      );
+    case "chevron_right":
+      return (
+        <svg {...sharedProps}>
+          <path d="m9 6 6 6-6 6" />
+        </svg>
+      );
+    case "delete":
+      return (
+        <svg {...sharedProps}>
+          <path d="M4 7h16" />
+          <path d="M10 11v6M14 11v6" />
+          <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+          <path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" />
+        </svg>
+      );
     default:
       return (
         <span
@@ -516,10 +887,14 @@ function ConversationNav({
   conversations,
   selectedConversationId,
   onSelect,
+  onDelete,
+  deletingConversationId,
 }: {
   conversations: ConversationSummary[];
   selectedConversationId: ConversationSelection;
   onSelect: (conversationId: ConversationSelection) => void;
+  onDelete: (conversation: ConversationSummary) => void;
+  deletingConversationId: number | null;
 }) {
   const isShowcaseActive = selectedConversationId === SHOWCASE_CHAT_ID;
 
@@ -543,21 +918,32 @@ function ConversationNav({
         const isActive = conversation.id === selectedConversationId;
 
         return (
-          <button
-            key={conversation.id}
-            type="button"
-            onClick={() => onSelect(conversation.id)}
-            className={
-              isActive
-                ? "flex w-full cursor-pointer items-center gap-3 rounded-md bg-primary/10 p-2.5 text-left font-semibold text-primary transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary/12 hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
-                : "flex w-full cursor-pointer items-center gap-3 rounded-md p-2.5 text-left text-on-surface-variant transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-container-low hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
-            }
-            aria-pressed={isActive}
-            aria-label={conversation.title}
-          >
-            <MaterialIcon icon="chat_bubble" className="text-[18px]" />
-            <span className="truncate text-xs">{conversation.title}</span>
-          </button>
+          <div key={conversation.id} className="group flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onSelect(conversation.id)}
+              className={
+                isActive
+                  ? "flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md bg-primary/10 p-2.5 text-left font-semibold text-primary transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary/12 hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+                  : "flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md p-2.5 text-left text-on-surface-variant transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-container-low hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
+              }
+              aria-pressed={isActive}
+              aria-label={conversation.title}
+            >
+              <MaterialIcon icon="chat_bubble" className="text-[18px] shrink-0" />
+              <span className="truncate text-xs">{conversation.title}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(conversation)}
+              disabled={deletingConversationId === conversation.id}
+              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-on-surface-variant transition-all duration-200 hover:-translate-y-0.5 hover:bg-[var(--workspace-danger-soft)] hover:text-[var(--workspace-danger-text)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+              aria-label={`Delete chat ${conversation.title}`}
+              title={`Delete ${conversation.title}`}
+            >
+              <MaterialIcon icon="delete" className="text-[16px]" />
+            </button>
+          </div>
         );
       })}
     </nav>
@@ -568,10 +954,14 @@ function DocumentLibrary({
   documents,
   previewDocumentId,
   onSelect,
+  onDelete,
+  deletingDocumentId,
 }: {
   documents: DocumentSummary[];
   previewDocumentId: number | null;
   onSelect: (documentId: number) => void;
+  onDelete: (document: DocumentSummary) => void;
+  deletingDocumentId: number | null;
 }) {
   return (
     <div className="flex-1 overflow-y-auto space-y-1 pr-2">
@@ -579,27 +969,40 @@ function DocumentLibrary({
         const isActive = document.id === previewDocumentId;
 
         return (
-          <button
-            key={document.id}
-            type="button"
-            onClick={() => onSelect(document.id)}
-            className={
-              isActive
-                ? "group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-primary/20 bg-[var(--workspace-elevated)] p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
-                : "group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-transparent p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:border-outline-variant/30 hover:bg-surface hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
-            }
-            aria-label={document.filename}
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--workspace-danger-soft)] text-[var(--workspace-danger-text)]">
-              <MaterialIcon icon="description" className="text-[20px]" />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-[11px] font-semibold">{document.filename}</p>
+          <div key={document.id} className="group flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onSelect(document.id)}
+              className={
+                isActive
+                  ? "group flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-xl border border-primary/20 bg-[var(--workspace-elevated)] p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+                  : "group flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-xl border border-transparent p-3 text-left text-on-surface transition-all duration-200 hover:-translate-y-0.5 hover:border-outline-variant/30 hover:bg-surface hover:shadow-sm active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/10"
+              }
+              aria-label={document.filename}
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--workspace-danger-soft)] text-[var(--workspace-danger-text)]">
+                <MaterialIcon icon="description" className="text-[20px]" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-semibold">{document.filename}</p>
                 <p className="text-[9px] font-medium text-on-surface-variant">
-                  {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
+                  {formatFileSize(document.file_size)}
+                  {" \u00b7 "}
+                  {formatRelativeTime(document.upload_date)}
                 </p>
-            </div>
-          </button>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(document)}
+              disabled={deletingDocumentId === document.id}
+              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-on-surface-variant transition-all duration-200 hover:-translate-y-0.5 hover:bg-[var(--workspace-danger-soft)] hover:text-[var(--workspace-danger-text)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+              aria-label={`Delete document ${document.filename}`}
+              title={`Delete ${document.filename}`}
+            >
+              <MaterialIcon icon="delete" className="text-[16px]" />
+            </button>
+          </div>
         );
       })}
     </div>
@@ -667,7 +1070,9 @@ function ActiveContext({
                     <div className="min-w-0">
                       <p className="truncate text-[11px] font-semibold text-on-surface">{document.filename}</p>
                       <p className="text-[9px] font-medium text-on-surface-variant">
-                        {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
+                        {formatFileSize(document.file_size)}
+                        {" \u00b7 "}
+                        {formatRelativeTime(document.upload_date)}
                       </p>
                     </div>
                   </button>
@@ -762,17 +1167,85 @@ function ShowcaseScopeChip({ document }: { document: ShowcaseScopeDocument }) {
       : "border-outline-variant/30 bg-surface-container-low text-on-surface-variant";
 
   return (
-    <div className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 shadow-[0_8px_22px_rgba(25,28,30,0.04)] ${toneClassName}`}>
-      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/8 text-primary">
-        <MaterialIcon icon="description" className="text-[12px]" />
+    <div
+      className={`flex items-center gap-3 rounded-[1.1rem] border px-4 py-3.5 shadow-[0_10px_24px_rgba(25,28,30,0.05)] ${toneClassName}`}
+    >
+      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/8 text-primary">
+        <MaterialIcon icon="description" className="text-[15px]" />
       </div>
-      <span className="text-[11px] font-semibold tracking-[-0.01em]">{document.filename}</span>
-      <MaterialIcon icon="close" className="text-[12px] text-on-surface-variant/55" />
+      <span className="text-[14px] font-semibold tracking-[-0.01em]">{document.filename}</span>
+      <MaterialIcon icon="close" className="text-[14px] text-on-surface-variant/55" />
     </div>
   );
 }
 
-function ComplianceRiskSection({ section }: { section: ComplianceSection }) {
+function TypingCaret({ active }: { active: boolean }) {
+  return active ? <span className="ml-1 inline-block animate-pulse text-primary">|</span> : null;
+}
+
+function ShowcaseAssistantLoader({ label }: { label: string }) {
+  return (
+    <div className="mb-8 rounded-[1.9rem] border border-outline-variant/30 bg-[linear-gradient(180deg,var(--workspace-elevated),rgba(255,255,255,0.72))] px-7 py-6 shadow-[0_18px_40px_rgba(25,28,30,0.06)]">
+      <div className="flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.1rem] bg-primary/10 text-primary">
+          <MaterialIcon icon="auto_awesome" className="text-[20px]" filled />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-[13px] font-black uppercase tracking-[0.2em] text-primary/75">Thinking</p>
+            <div className="flex items-center gap-1" aria-hidden="true">
+              {[0, 1, 2].map((index) => (
+                <span
+                  key={index}
+                  className="h-2 w-2 animate-bounce rounded-full bg-primary/65"
+                  style={{ animationDelay: `${index * 120}ms` }}
+                />
+              ))}
+            </div>
+          </div>
+          <p className="truncate text-[17px] font-medium text-on-surface/72">{label}</p>
+        </div>
+      </div>
+      <div className="mt-5 space-y-3.5" aria-hidden="true">
+        <div className="h-2.5 rounded-full bg-primary/8">
+          <div className="h-2.5 w-[68%] animate-pulse rounded-full bg-primary/30" />
+        </div>
+        <div className="h-2.5 rounded-full bg-primary/8">
+          <div className="h-2.5 w-[82%] animate-pulse rounded-full bg-primary/24" style={{ animationDelay: "140ms" }} />
+        </div>
+        <div className="h-2.5 rounded-full bg-primary/8">
+          <div className="h-2.5 w-[54%] animate-pulse rounded-full bg-primary/18" style={{ animationDelay: "240ms" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StreamedMarkdownLine({
+  text,
+  animate,
+  startDelay = 0,
+  wordDelay = 82,
+}: {
+  text: string;
+  animate: boolean;
+  startDelay?: number;
+  wordDelay?: number;
+}) {
+  const value = useWordReveal(text, animate, startDelay, wordDelay);
+  return <>{renderInlineMarkdown(value)}</>;
+}
+
+function ComplianceRiskSection({
+  section,
+  animate = false,
+  itemDelayBase = 0,
+}: {
+  section: ComplianceSection;
+  animate?: boolean;
+  itemDelayBase?: number;
+}) {
+  const entered = useMountTransition(animate);
   const toneClasses = {
     high: {
       accent: "bg-red-500",
@@ -789,22 +1262,39 @@ function ComplianceRiskSection({ section }: { section: ComplianceSection }) {
   }[section.tone];
 
   return (
-    <div className="relative px-7 py-3">
-      <div className={`absolute left-0 top-0 bottom-0 w-[6px] rounded-full ${toneClasses.accent}`} />
-      <div className="pl-5">
-        <div className="mb-3 flex flex-wrap items-baseline gap-2">
-          <h3 className="text-[13px] font-black uppercase tracking-[0.01em] text-on-surface">{section.title}</h3>
-          <span className="text-[13px] font-black text-on-surface/75" aria-hidden="true">
-            {"—"}
+    <div
+      className={`relative px-10 py-6 transition-all duration-500 ${
+        entered ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
+      }`}
+    >
+      <div className={`absolute left-0 top-0 bottom-0 w-[8px] rounded-full ${toneClasses.accent}`} />
+      <div className="pl-8">
+        <div className="mb-5 flex flex-wrap items-baseline gap-4">
+          <h3 className="text-[20px] font-black uppercase tracking-[0.01em] text-on-surface lg:text-[24px]">
+            <StreamedMarkdownLine text={section.title} animate={animate} startDelay={40} wordDelay={88} />
+          </h3>
+          <span className="text-[20px] font-black text-on-surface/75 lg:text-[24px]" aria-hidden="true">
+            {"\u2014"}
           </span>
-          <span className={`text-[11px] font-black uppercase tracking-[0.04em] ${toneClasses.status}`}>
-            {section.status}
+          <span className={`text-[16px] font-black uppercase tracking-[0.08em] lg:text-[18px] ${toneClasses.status}`}>
+            <StreamedMarkdownLine text={section.status} animate={animate} startDelay={180} wordDelay={110} />
           </span>
         </div>
-        <ul className="space-y-2 pl-7 text-[12px] leading-6 text-on-surface-variant">
-          {section.items.map((item) => (
-            <li key={item} className="list-disc pl-1">
-              {renderInlineMarkdown(item)}
+        <ul className="space-y-4 pl-8 text-[20px] leading-10 text-on-surface-variant lg:text-[22px] lg:leading-[2.9rem]">
+          {section.items.map((item, index) => (
+            <li
+              key={item}
+              className={`list-disc pl-1 transition-all duration-500 ${
+                entered ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
+              }`}
+              style={animate ? { transitionDelay: `${itemDelayBase + index * 90}ms` } : undefined}
+            >
+              <StreamedMarkdownLine
+                text={item}
+                animate={animate}
+                startDelay={280 + index * 220}
+                wordDelay={78}
+              />
             </li>
           ))}
         </ul>
@@ -813,51 +1303,292 @@ function ComplianceRiskSection({ section }: { section: ComplianceSection }) {
   );
 }
 
-function ShowcaseStage() {
+function WorkspaceBrandLockup({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="mx-auto max-w-[1040px]">
-      <div className="mb-6">
-        <p className="mb-3 text-[10px] font-black uppercase tracking-[0.24em] text-on-surface-variant/55">
+    <div className="flex items-center gap-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white shadow-[0_14px_28px_rgba(67,56,202,0.2)]">
+        <MaterialIcon icon="architecture" className="text-[1.15rem]" filled />
+      </div>
+      <div>
+        <h1 className={`${compact ? "text-lg" : "text-xl"} font-semibold tracking-[-0.01em] text-on-surface`}>
+          ReSource
+        </h1>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
+          Digital Atelier
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ShowcaseQuestionCard() {
+  return (
+    <div className="rounded-[2rem] border border-secondary/28 bg-[var(--workspace-elevated)] p-6 shadow-[0_16px_36px_rgba(25,28,30,0.06)]">
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_8px_20px_rgba(181,164,109,0.12)]">
+          <MaterialIcon icon="person" className="text-[18px] text-primary" />
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-on-surface-variant/55">
+            User Question
+          </p>
+          <p className="mt-2 text-[1.02rem] font-semibold leading-7 tracking-[-0.02em] text-on-surface">
+            {SHOWCASE_CHAT_QUESTION}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThumbnailQuestionCue() {
+  return (
+    <div className="rounded-[2.2rem] border border-secondary/22 bg-[var(--workspace-elevated)] px-7 py-7 shadow-[0_20px_42px_rgba(25,28,30,0.065)]">
+      <div className="mb-4 flex items-center gap-4">
+        <div className="flex h-13 w-13 shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_11px_24px_rgba(181,164,109,0.15)]">
+          <MaterialIcon icon="person" className="text-[21px] text-primary" />
+        </div>
+        <p className="text-[12px] font-black uppercase tracking-[0.25em] text-on-surface-variant/55">User Question</p>
+      </div>
+      <p className="max-w-[20rem] text-[1.45rem] font-semibold leading-[2.55rem] tracking-[-0.02em] text-on-surface">
+        {SHOWCASE_CHAT_QUESTION}
+      </p>
+    </div>
+  );
+}
+
+function ShowcaseStage({
+  variant = "workspace",
+  replay,
+}: {
+  variant?: ShowcaseStageVariant;
+  replay?: AnalysisReplayState;
+}) {
+  const autoScrollAnchorRef = useShowcaseAutoScroll(variant === "workspace" ? replay : undefined);
+
+  if (variant === "thumbnail") {
+    const completeReplay = createCompletedAnalysisReplayState();
+
+    return (
+      <div className="flex min-h-[100dvh] w-full flex-col gap-8">
+        <div className="flex items-center justify-between gap-8 border-b border-outline-variant/28 pb-5">
+          <WorkspaceBrandLockup compact />
+          <div className="flex flex-wrap justify-end gap-4">
+            {SHOWCASE_SCOPE_DOCUMENTS.map((document) => (
+              <ShowcaseScopeChip key={document.filename} document={document} />
+            ))}
+          </div>
+        </div>
+
+        <div className="grid flex-1 items-start gap-7 xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <div className="pt-18">
+            <ThumbnailQuestionCue />
+          </div>
+
+          <div className="relative flex min-h-[calc(100dvh-8rem)] items-start">
+            <div className="absolute -left-10 top-12 z-10 hidden h-[4.9rem] w-[4.9rem] shrink-0 items-center justify-center rounded-full bg-primary shadow-[0_20px_40px_rgba(67,56,202,0.24)] ring-4 ring-primary-container/40 xl:flex">
+              <MaterialIcon icon="auto_awesome" className="text-[1.55rem] text-white" filled />
+            </div>
+
+            <div className="w-full max-w-[92rem] rounded-[2.7rem] border border-outline-variant/40 bg-[linear-gradient(180deg,var(--workspace-preview-start),var(--workspace-preview-end))] px-12 py-11 shadow-[0_30px_70px_rgba(25,28,30,0.11)] xl:px-14 xl:py-14">
+              <div className="mb-8">
+                <p className="text-[2.75rem] font-black uppercase tracking-[-0.05em] text-on-surface xl:text-[3.5rem]">
+                  {completeReplay.titleText}
+                </p>
+                <p className="mt-2 text-[15px] font-bold uppercase tracking-[0.22em] text-on-surface-variant/50">
+                  {completeReplay.subtitleText}
+                </p>
+              </div>
+
+              <div className="space-y-8">
+                {SHOWCASE_COMPLIANCE_SECTIONS.slice(0, completeReplay.visibleSectionCount).map((section, index) => (
+                  <ComplianceRiskSection
+                    key={section.title}
+                    section={section}
+                    animate={false}
+                    itemDelayBase={index * 80}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const activeReplay = replay ?? createCompletedAnalysisReplayState();
+
+  return (
+    <div className="w-full max-w-[1680px] px-3 lg:px-6">
+      <div className="mb-10">
+        <p className="mb-5 text-[14px] font-black uppercase tracking-[0.24em] text-on-surface-variant/55">
           Document Scope
         </p>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-4">
           {SHOWCASE_SCOPE_DOCUMENTS.map((document) => (
             <ShowcaseScopeChip key={document.filename} document={document} />
           ))}
         </div>
       </div>
 
-      <div className="mb-6 flex items-start gap-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_10px_24px_rgba(25,28,30,0.04)]">
-          <MaterialIcon icon="person" className="text-[18px] text-primary" />
+      <div className="mb-10 flex items-start gap-6">
+        <div className="flex h-[4.5rem] w-[4.5rem] shrink-0 items-center justify-center rounded-full border border-secondary/25 bg-secondary-container shadow-[0_12px_28px_rgba(25,28,30,0.05)]">
+          <MaterialIcon icon="person" className="text-[28px] text-primary" />
         </div>
-        <div className="pt-2">
-          <p className="max-w-[860px] text-[1.05rem] font-semibold leading-8 tracking-[-0.02em] text-on-surface">
-            {SHOWCASE_CHAT_QUESTION}
-          </p>
+        <div className="pt-3">
+          {activeReplay.showUserMessage ? (
+            <p className="max-w-[1460px] text-[1.7rem] font-semibold leading-[3.25rem] tracking-[-0.025em] text-on-surface lg:text-[2rem]">
+              {activeReplay.userText}
+            </p>
+          ) : (
+            <p className="text-[15px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/45">
+              Waiting for prompt submission...
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="flex items-start gap-5">
-        <div className="mt-2 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary shadow-[0_14px_30px_rgba(67,56,202,0.22)] ring-4 ring-primary-container/40">
-          <MaterialIcon icon="auto_awesome" className="text-[1.05rem] text-white" filled />
-        </div>
-        <div className="flex-1 rounded-[2rem] border border-outline-variant/40 bg-[linear-gradient(180deg,var(--workspace-preview-start),var(--workspace-preview-end))] px-8 py-7 shadow-[0_18px_44px_rgba(25,28,30,0.08)]">
-          <div className="mb-5">
-            <p className="text-[1.55rem] font-black uppercase tracking-[-0.04em] text-on-surface">
-              Executive Compliance Summary
-            </p>
-            <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.18em] text-on-surface-variant/50">
-              Review Portal Output
-            </p>
+      {activeReplay.showThinking ? (
+        <div className="mb-10 flex items-start gap-7">
+          <div className="mt-2 flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-full bg-primary shadow-[0_18px_38px_rgba(67,56,202,0.24)] ring-4 ring-primary-container/40">
+            <MaterialIcon icon="auto_awesome" className="text-[1.75rem] text-white" filled />
           </div>
+          <div className="flex-1">
+            <ShowcaseAssistantLoader label="Reviewing active PDFs before generation" />
+          </div>
+        </div>
+      ) : null}
 
-          <div className="space-y-5">
-            {SHOWCASE_COMPLIANCE_SECTIONS.map((section) => (
-              <ComplianceRiskSection key={section.title} section={section} />
-            ))}
+      {activeReplay.assistantVisible ? (
+        <div className="flex items-start gap-7">
+          <div className="mt-2 flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-full bg-primary shadow-[0_18px_38px_rgba(67,56,202,0.24)] ring-4 ring-primary-container/40">
+            <MaterialIcon icon="auto_awesome" className="text-[1.75rem] text-white" filled />
+          </div>
+          <div className="flex-1 rounded-[2.8rem] border border-outline-variant/40 bg-[linear-gradient(180deg,var(--workspace-preview-start),var(--workspace-preview-end))] px-14 py-12 shadow-[0_28px_64px_rgba(25,28,30,0.11)] transition-all duration-500 translate-y-0 opacity-100 lg:px-16 lg:py-14">
+            <div className="mb-8">
+              <p className="text-[2.8rem] font-black uppercase tracking-[-0.05em] text-on-surface lg:text-[3.3rem]">
+                {activeReplay.titleText}
+              </p>
+              <p className="mt-3 text-[16px] font-bold uppercase tracking-[0.22em] text-on-surface-variant/50">
+                {activeReplay.subtitleText}
+              </p>
+            </div>
+
+            <div className="space-y-8">
+              {SHOWCASE_COMPLIANCE_SECTIONS.slice(0, activeReplay.visibleSectionCount).map((section, index) => (
+                <ComplianceRiskSection
+                  key={section.title}
+                  section={section}
+                  animate
+                  itemDelayBase={index * 100}
+                />
+              ))}
+            </div>
           </div>
         </div>
+      ) : null}
+      <div ref={autoScrollAnchorRef} className="h-10" aria-hidden="true" />
+    </div>
+  );
+}
+
+function WorkspaceComposer({
+  value,
+  onChange,
+  onKeyDown,
+  onSubmit,
+  placeholder = "Ask about the active PDFs...",
+  disabled = false,
+  readOnly = false,
+  showCaret = false,
+  caretActive = false,
+  submitAriaLabel = "Send message",
+  buttonPressed = false,
+  variant = "default",
+}: {
+  value: string;
+  onChange?: (value: string) => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  readOnly?: boolean;
+  showCaret?: boolean;
+  caretActive?: boolean;
+  submitAriaLabel?: string;
+  buttonPressed?: boolean;
+  variant?: "default" | "showcase";
+}) {
+  const isShowcaseVariant = variant === "showcase";
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className={`mb-0 overflow-hidden border border-outline-variant/45 bg-surface-container-lowest shadow-[0_8px_24px_rgba(25,28,30,0.06)] ${
+        isShowcaseVariant ? "rounded-[2.4rem] shadow-[0_20px_44px_rgba(25,28,30,0.09)]" : "rounded-3xl"
+      }`}
+    >
+      <div className={`flex items-center gap-4 ${isShowcaseVariant ? "p-8 lg:p-9" : "p-5"}`}>
+        <div className="flex-1">
+          {showCaret && readOnly ? (
+            <div
+              aria-label={placeholder}
+              className={`w-full whitespace-pre-wrap break-words px-1 text-on-surface ${
+                isShowcaseVariant ? "min-h-20 py-5 text-[24px] leading-[2.75rem] lg:text-[28px]" : "min-h-12 py-3 text-[15px] leading-6"
+              }`}
+            >
+              {value ? (
+                <>
+                  <span>{value}</span>
+                  <TypingCaret active={caretActive} />
+                </>
+              ) : (
+                <span className="text-on-surface-variant/40">
+                  {placeholder}
+                  <TypingCaret active={caretActive} />
+                </span>
+              )}
+            </div>
+          ) : (
+            <textarea
+              value={value}
+              onChange={onChange ? (event) => onChange(event.target.value) : undefined}
+              onKeyDown={onKeyDown}
+              placeholder={placeholder}
+              rows={1}
+              readOnly={readOnly}
+              disabled={disabled}
+              className={`w-full cursor-text resize-none border-none bg-surface-container-lowest px-1 text-on-surface outline-none placeholder:text-on-surface-variant/40 focus:border-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 disabled:cursor-default ${
+                isShowcaseVariant ? "min-h-20 py-5 text-[24px] leading-[2.75rem] lg:text-[28px]" : "min-h-12 py-3 text-[15px] leading-6"
+              }`}
+            />
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            disabled={disabled}
+            className={`flex cursor-pointer flex-none items-center justify-center self-center rounded-full bg-primary text-white shadow-lg shadow-primary/30 transition-all duration-200 hover:-translate-y-0.5 hover:scale-105 hover:shadow-[0_14px_28px_rgba(67,56,202,0.34)] active:translate-y-0 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${
+              isShowcaseVariant ? "h-[4.5rem] w-[4.5rem]" : "h-11 w-11"
+            } ${
+              buttonPressed ? "scale-90" : ""
+            }`}
+            aria-label={submitAriaLabel}
+          >
+            <MaterialIcon icon="send" filled />
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function ThumbnailPreviewShell() {
+  return (
+    <div className="min-h-[100dvh] overflow-x-hidden bg-surface text-on-surface">
+      <div className="flex min-h-[100dvh] w-full items-start px-10 py-10 xl:px-12 xl:py-12">
+        <ShowcaseStage variant="thumbnail" />
       </div>
     </div>
   );
@@ -910,7 +1641,11 @@ function PreviewStage({ document }: { document: DocumentSummary }) {
       <div className="rounded-3xl border border-outline-variant/40 bg-[var(--workspace-elevated)] p-8 shadow-sm">
         <h2 className="text-xl font-semibold tracking-[-0.01em] text-on-surface">{document.filename}</h2>
         <p className="mt-2 text-sm text-on-surface-variant">
-          PDF preview · {formatFileSize(document.file_size)} · {formatRelativeTime(document.upload_date)}
+          PDF preview
+          {" \u00b7 "}
+          {formatFileSize(document.file_size)}
+          {" \u00b7 "}
+          {formatRelativeTime(document.upload_date)}
         </p>
       </div>
       <div className="overflow-hidden rounded-3xl border border-outline-variant/40 bg-[var(--workspace-elevated)] shadow-sm">
@@ -924,10 +1659,16 @@ function PreviewStage({ document }: { document: DocumentSummary }) {
   );
 }
 
-export default function ResourceWorkspace() {
+export default function ResourceWorkspace({
+  mode = "default",
+}: {
+  mode?: ResourceWorkspaceMode;
+}) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const initializedRef = useRef(false);
   const [theme, setTheme] = useState<WorkspaceTheme>("light");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [analysisPlaybackKey, setAnalysisPlaybackKey] = useState(0);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<ConversationSelection>(null);
@@ -942,8 +1683,12 @@ export default function ResourceWorkspace() {
   const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [deletingConversationId, setDeletingConversationId] = useState<number | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
+  const isThumbnailPreview = mode === "thumbnail-preview";
   const isShowcaseSelected = selectedConversationId === SHOWCASE_CHAT_ID;
   const isDarkMode = theme === "dark";
+  const analysisReplay = useAnalysisReplay(isShowcaseSelected, analysisPlaybackKey);
 
   const selectedConversation = useMemo(
     () =>
@@ -961,8 +1706,7 @@ export default function ResourceWorkspace() {
     return documents.filter((document) => !activeIds.has(document.id));
   }, [activeDocuments, documents]);
 
-  async function loadConversation(conversationId: number) {
-    const detail = await fetchConversation(conversationId);
+  function syncConversationState(detail: ConversationDetail) {
     setSelectedConversationId(detail.conversation.id);
     setMessages(detail.messages);
     setActiveDocuments(detail.active_documents);
@@ -978,8 +1722,14 @@ export default function ResourceWorkspace() {
     replaceConversationInUrl(detail.conversation.id);
   }
 
+  async function loadConversation(conversationId: number) {
+    const detail = await fetchConversation(conversationId);
+    syncConversationState(detail);
+  }
+
   useEffect(() => {
     setTheme(getPreferredTheme());
+    setIsSidebarCollapsed(getPreferredSidebarState());
   }, []);
 
   useEffect(() => {
@@ -995,6 +1745,19 @@ export default function ResourceWorkspace() {
   }, [theme]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    if (isThumbnailPreview) {
+      setIsBootstrapping(false);
+      return;
+    }
+
     if (initializedRef.current) {
       return;
     }
@@ -1018,11 +1781,7 @@ export default function ResourceWorkspace() {
             conversationId = sorted[0].id;
           } else {
             const detail = await createConversation();
-            setConversations([detail.conversation]);
-            setSelectedConversationId(detail.conversation.id);
-            setMessages(detail.messages);
-            setActiveDocuments(detail.active_documents);
-            replaceConversationInUrl(detail.conversation.id);
+            syncConversationState(detail);
             setIsBootstrapping(false);
             return;
           }
@@ -1035,7 +1794,11 @@ export default function ResourceWorkspace() {
         setIsBootstrapping(false);
       }
     })();
-  }, []);
+  }, [isThumbnailPreview]);
+
+  if (isThumbnailPreview) {
+    return <ThumbnailPreviewShell />;
+  }
 
   async function handleSelectConversation(conversationId: ConversationSelection) {
     setErrorMessage(null);
@@ -1045,6 +1808,7 @@ export default function ResourceWorkspace() {
     setIsPickerOpen(false);
 
     if (!isRealConversationId(conversationId)) {
+      setAnalysisPlaybackKey((current) => current + 1);
       setSelectedConversationId(SHOWCASE_CHAT_ID);
       replaceConversationInUrl(null);
       return;
@@ -1066,11 +1830,7 @@ export default function ResourceWorkspace() {
 
     try {
       const detail = await createConversation();
-      setConversations((current) => sortConversations([detail.conversation, ...current]));
-      setSelectedConversationId(detail.conversation.id);
-      setMessages(detail.messages);
-      setActiveDocuments(detail.active_documents);
-      replaceConversationInUrl(detail.conversation.id);
+      syncConversationState(detail);
     } catch (error) {
       setErrorMessage(describeError(error));
     }
@@ -1102,11 +1862,7 @@ export default function ResourceWorkspace() {
       if (!conversationId) {
         const detail = await createConversation();
         conversationId = detail.conversation.id;
-        setConversations((current) => sortConversations([detail.conversation, ...current]));
-        setSelectedConversationId(detail.conversation.id);
-        setMessages(detail.messages);
-        setActiveDocuments(detail.active_documents);
-        replaceConversationInUrl(detail.conversation.id);
+        syncConversationState(detail);
       }
 
       const result = await uploadDocument(file);
@@ -1182,6 +1938,102 @@ export default function ResourceWorkspace() {
       await syncActiveDocuments(nextIds);
     } catch (error) {
       setErrorMessage(describeError(error));
+    }
+  }
+
+  async function handleDeleteConversation(conversation: ConversationSummary) {
+    if (
+      !confirmDestructiveAction(`Delete "${conversation.title}" permanently? This removes it from the sidebar and backend.`)
+    ) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setStageMode("chat");
+    setPreviewDocumentId(null);
+    setIsPickerOpen(false);
+    setDeletingConversationId(conversation.id);
+
+    try {
+      await deleteConversation(conversation.id);
+
+      const remainingConversations = conversations.filter(
+        (currentConversation) => currentConversation.id !== conversation.id,
+      );
+      setConversations(remainingConversations);
+
+      if (selectedConversationId === conversation.id) {
+        setSelectedConversationId(null);
+        setMessages([]);
+        setActiveDocuments([]);
+        replaceConversationInUrl(null);
+
+        if (remainingConversations.length) {
+          await loadConversation(remainingConversations[0].id);
+        } else {
+          const detail = await createConversation();
+          syncConversationState(detail);
+        }
+      }
+
+      setStatusMessage(`Deleted "${conversation.title}".`);
+    } catch (error) {
+      setErrorMessage(describeError(error));
+    } finally {
+      setDeletingConversationId(null);
+    }
+  }
+
+  async function handleDeleteDocument(document: DocumentSummary) {
+    if (
+      !confirmDestructiveAction(
+        `Delete "${document.filename}" permanently? This removes it from the library, active context, and backend storage.`,
+      )
+    ) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setIsPickerOpen(false);
+    setDeletingDocumentId(document.id);
+
+    try {
+      await deleteDocument(document.id);
+
+      setDocuments((current) => current.filter((entry) => entry.id !== document.id));
+
+      if (previewDocumentId === document.id) {
+        setPreviewDocumentId(null);
+        setStageMode("chat");
+      }
+
+      const refreshedConversations = sortConversations(await fetchConversations());
+      setConversations(refreshedConversations);
+
+      if (isRealConversationId(selectedConversationId)) {
+        const detail = await fetchConversation(selectedConversationId);
+        setMessages(detail.messages);
+        setActiveDocuments(detail.active_documents);
+        setConversations((current) =>
+          sortConversations(
+            current.some((conversation) => conversation.id === detail.conversation.id)
+              ? current.map((conversation) =>
+                  conversation.id === detail.conversation.id ? detail.conversation : conversation,
+                )
+              : [...current, detail.conversation],
+          ),
+        );
+      } else {
+        setActiveDocuments((current) => current.filter((entry) => entry.id !== document.id));
+      }
+
+      setStatusMessage(`${document.filename} deleted.`);
+    } catch (error) {
+      setErrorMessage(describeError(error));
+    } finally {
+      setDeletingDocumentId(null);
     }
   }
 
@@ -1282,7 +2134,7 @@ export default function ResourceWorkspace() {
   const stageTitle = isShowcaseSelected ? SHOWCASE_CHAT_TITLE : formatStageTitle(selectedConversation);
 
   return (
-    <div className="overflow-hidden bg-surface text-on-surface" data-theme={theme}>
+    <div className="min-h-[100dvh] overflow-x-hidden bg-surface text-on-surface" data-theme={theme}>
       <input
         ref={uploadInputRef}
         type="file"
@@ -1291,17 +2143,35 @@ export default function ResourceWorkspace() {
         onChange={handleUploadSelection}
         aria-label="Choose PDF file"
       />
-      <aside className="fixed left-0 top-0 z-20 flex h-screen w-80 flex-col bg-surface-container px-6 py-8 font-['Inter'] antialiased tracking-tight">
+      {isSidebarCollapsed ? (
+        <button
+          type="button"
+          onClick={() => setIsSidebarCollapsed(false)}
+          className="fixed left-4 top-4 z-30 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-outline-variant/40 bg-[var(--workspace-elevated)] text-on-surface-variant shadow-[0_10px_24px_rgba(25,28,30,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:text-primary hover:shadow-[0_16px_28px_rgba(25,28,30,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+        >
+          <MaterialIcon icon="chevron_right" className="text-[18px]" />
+        </button>
+      ) : null}
+      <aside
+        className={`fixed left-0 top-0 z-20 flex h-[100dvh] w-80 flex-col bg-surface-container px-6 py-8 font-['Inter'] antialiased tracking-tight transition-transform duration-300 ${
+          isSidebarCollapsed ? "-translate-x-full" : "translate-x-0"
+        }`}
+      >
         <div className="mb-6 flex items-center gap-3 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
-            <MaterialIcon icon="architecture" className="text-lg" filled />
-          </div>
           <div className="flex-1">
-            <h1 className="text-xl font-semibold tracking-[-0.01em] text-on-surface">ReSource</h1>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant opacity-60">
-              Digital Atelier
-            </p>
+            <WorkspaceBrandLockup />
           </div>
+          <button
+            type="button"
+            onClick={() => setIsSidebarCollapsed(true)}
+            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-outline-variant/40 bg-[var(--workspace-elevated)] text-on-surface-variant shadow-[0_10px_24px_rgba(25,28,30,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:text-primary hover:shadow-[0_16px_28px_rgba(25,28,30,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <MaterialIcon icon="chevron_left" className="text-[18px]" />
+          </button>
           <button
             type="button"
             onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -1339,6 +2209,8 @@ export default function ResourceWorkspace() {
             conversations={conversations}
             selectedConversationId={selectedConversationId}
             onSelect={handleSelectConversation}
+            onDelete={handleDeleteConversation}
+            deletingConversationId={deletingConversationId}
           />
         </div>
         <div className="flex min-h-0 flex-1 flex-col border-t border-outline-variant/30 pt-6">
@@ -1357,10 +2229,16 @@ export default function ResourceWorkspace() {
               setStageMode("preview");
               setPreviewDocumentId(documentId);
             }}
+            onDelete={handleDeleteDocument}
+            deletingDocumentId={deletingDocumentId}
           />
         </div>
       </aside>
-      <main className="relative ml-80 flex h-screen flex-col bg-surface">
+      <main
+        className={`relative flex min-h-[100dvh] flex-col bg-surface transition-[margin] duration-300 ${
+          isSidebarCollapsed ? "ml-0" : "ml-80"
+        }`}
+      >
         {isShowcaseSelected ? null : (
           <header className="z-10 flex w-full flex-col border-b border-outline-variant/30 bg-surface-container-low">
             <div className="flex h-14 items-center justify-between px-12">
@@ -1383,7 +2261,7 @@ export default function ResourceWorkspace() {
         )}
         <section
           className={`mx-auto w-full px-12 ${
-            isShowcaseSelected ? "max-w-[1180px] py-5 overflow-visible" : "max-w-5xl flex-1 overflow-y-auto py-10"
+            isShowcaseSelected ? "max-w-none py-5 overflow-visible" : "max-w-5xl flex-1 py-10"
           }`}
         >
           {errorMessage ? (
@@ -1397,41 +2275,41 @@ export default function ResourceWorkspace() {
             </div>
           ) : null}
           {isShowcaseSelected ? (
-            <ShowcaseStage />
+            <ShowcaseStage replay={analysisReplay} />
           ) : stageMode === "preview" && previewDocument ? (
             <PreviewStage document={previewDocument} />
           ) : (
             <ChatStage title={stageTitle} messages={messages} loading={isBootstrapping} />
           )}
         </section>
-        {stageMode === "chat" ? (
-          <footer className={`bg-surface px-12 ${isShowcaseSelected ? "pb-6 pt-2" : "pb-10 pt-0"}`}>
-            <div className={`mx-auto ${isShowcaseSelected ? "max-w-[1040px]" : "max-w-4xl"}`}>
-              <form
-                onSubmit={handleSendMessage}
-                className="mb-0 overflow-hidden rounded-3xl border border-outline-variant/45 bg-surface-container-lowest shadow-[0_8px_24px_rgba(25,28,30,0.06)]"
-              >
-                <div className="flex items-center gap-3 p-5">
-                  <textarea
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={handleComposerKeyDown}
-                    placeholder="Ask about the active PDFs..."
-                    rows={1}
-                    className="min-h-12 flex-1 cursor-text resize-none border-none bg-surface-container-lowest px-1 py-3 text-[15px] leading-6 text-on-surface outline-none placeholder:text-on-surface-variant/40 focus:border-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="submit"
-                      disabled={isSending || isBootstrapping}
-                      className="flex h-11 w-11 cursor-pointer flex-none items-center justify-center self-center rounded-full bg-primary text-white shadow-lg shadow-primary/30 transition-all duration-200 hover:-translate-y-0.5 hover:scale-105 hover:shadow-[0_14px_28px_rgba(67,56,202,0.34)] active:translate-y-0 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
-                      aria-label="Send message"
-                    >
-                      <MaterialIcon icon="send" filled />
-                    </button>
-                  </div>
-                </div>
-              </form>
+        {stageMode === "chat" && (!isShowcaseSelected || (!analysisReplay.isSubmitting && !analysisReplay.hasSubmitted)) ? (
+          <footer className={`mt-auto bg-surface px-12 ${isShowcaseSelected ? "pb-6 pt-2" : "pb-10 pt-0"}`}>
+            <div className={`${isShowcaseSelected ? "w-full max-w-[1680px]" : "mx-auto max-w-4xl"}`}>
+              {isShowcaseSelected ? (
+                <WorkspaceComposer
+                  value={analysisReplay.composerText}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                  }}
+                  placeholder="Ask about the active PDFs..."
+                  readOnly
+                  showCaret
+                  caretActive={analysisReplay.showComposerCaret}
+                  submitAriaLabel="Send message"
+                  buttonPressed={analysisReplay.isSubmitting}
+                  variant="showcase"
+                />
+              ) : (
+                <WorkspaceComposer
+                  value={draft}
+                  onChange={setDraft}
+                  onKeyDown={handleComposerKeyDown}
+                  onSubmit={handleSendMessage}
+                  placeholder="Ask about the active PDFs..."
+                  disabled={isSending || isBootstrapping}
+                  submitAriaLabel="Send message"
+                />
+              )}
             </div>
           </footer>
         ) : null}
@@ -1439,3 +2317,4 @@ export default function ResourceWorkspace() {
     </div>
   );
 }
+
